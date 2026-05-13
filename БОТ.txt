@@ -1,9 +1,0 @@
-WB_Logistic_bot   - имя бота для ссылок
-WB_Logistic_help_bot - юзернейм бота
-8748204910:AAEE_JFcn0Y3HP3Pr0dyCPM4mgfRxXacIyM   --токен
- Your web app link is t.me/WB_Logistic_help_bot/transfer. Open it to start developing your web app!
-
-У меня есть бот в телеграмме WB_Logistic_help_bot Это логистический чат  бот. Я хочу сделать  функциональность перераспределения остатков со склада на склад для продавцов Wildberries. За эту часть у чат бота должно отвечать mini app, а именно https://webapp.superbot.pro/transfers. У этого mini app есть следующие разделы: 1. Список запросов на перемещение https://webapp.superbot.pro/transfers/list  2. Создать запрос https://webapp.superbot.pro/transfers/create 3. Оплата https://webapp.superbot.pro/paymentsv2/pay 4. История оплат https://webapp.superbot.pro/paymentsv2 5. Текущие квоты https://webapp.superbot.pro/transfers/chart 6. Статистика перемещений. https://webapp.superbot.pro/transfers/stats.  Выше разделов указан Баланс перемещений и Зарезервировано перемещений. 
-Общение с Wildberrries происходит через WB API (HTTP REST API). Оплата перемещений остатков в разделе 3. Оплата происходит через сервис ЮКассы. 
-Для перемещения остатков чат бот @WBSupplyHelperBot просит один раз телефон пользователя и авторизовывается через код смс.
-Помоги мне разработать такое же mini app. Нужна подробная, пошаговая инструкция.
