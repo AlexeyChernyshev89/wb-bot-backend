@@ -210,7 +210,7 @@ app.get('/transfers/list', telegramAuth, async (req, res) => {
 // =====================================================
 //  ПЛАТЕЖИ (ЮKassa) – каркас
 // =====================================================
-const { YooKassa } = require('yookassa-sdk');
+
 const yooKassa = YooKassa({
   shop_id: process.env.YOOKASSA_SHOP_ID,
   secret_key: process.env.YOOKASSA_SECRET_KEY
