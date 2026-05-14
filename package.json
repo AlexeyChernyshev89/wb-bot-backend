@@ -14,7 +14,7 @@
     "pg": "^8.11.3",
     "axios": "^1.6.7",
     "jsonwebtoken": "^9.0.2",
-    "@tma.js/init-data-node": "^1.1.0",
+       "@telegram-apps/init-data-node": "^1.0.0",
     "yookassa-sdk": "^0.0.13"
   }
 }
