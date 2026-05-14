@@ -21,8 +21,62 @@ app.use(express.static('public'));
 
 // Подключение к базе данных
 const client = new Client({ connectionString: process.env.DATABASE_URL });
+// Функция, которая создаёт таблицы, если их ещё нет
+async function initDB() {
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        telegram_id BIGINT UNIQUE NOT NULL,
+        phone VARCHAR(20),
+        name VARCHAR(255),
+        username VARCHAR(255),
+        api_key_wb VARCHAR(255),
+        wb_token TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS sms_requests (
+        telegram_id BIGINT PRIMARY KEY,
+        phone VARCHAR(20),
+        request_id VARCHAR(255),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS transfer_requests (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        from_warehouse VARCHAR(255),
+        to_warehouse VARCHAR(255),
+        sku VARCHAR(50),
+        amount INTEGER,
+        status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        amount NUMERIC(10, 2),
+        status VARCHAR(50),
+        yookassa_id VARCHAR(255) UNIQUE,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('✅ Таблицы проверены/созданы');
+  } catch (err) {
+    console.error('❌ Ошибка создания таблиц:', err);
+  }
+}
+
+// Подключаемся и сразу инициализируем таблицы
 client.connect()
-  .then(() => console.log('✅ Подключено к PostgreSQL'))
+  .then(() => {
+    console.log('✅ Подключено к PostgreSQL');
+    return initDB(); // <-- создаём таблицы
+  })
   .catch(err => console.error('❌ Ошибка подключения к БД:', err));
 
 // =====================================================
