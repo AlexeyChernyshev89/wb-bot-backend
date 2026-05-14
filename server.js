@@ -8,7 +8,8 @@ const jwt = require('jsonwebtoken');
 const { isValid, parse } = require('@telegram-apps/init-data-node');
 const { requestSmsCode, confirmSmsCode } = require('./wb-auth');
 const { getWarehouses, getStocks, updateStocks } = require('./wb-api');
-app.use(express.static('public'));
+const YooKassa = require('yookassa-sdk');
+
 
 // --- Конфигурация ---
 const app = express();
@@ -25,6 +26,7 @@ client.connect()
   .then(() => console.log('✅ Подключено к PostgreSQL'))
   .catch(err => console.error('❌ Ошибка подключения к БД:', err));
 
+  app.use(express.static('public'));
 // =====================================================
 //  Middleware для проверки Telegram InitData
 // =====================================================
