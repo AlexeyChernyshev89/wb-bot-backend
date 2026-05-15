@@ -1,4 +1,4 @@
-// server.js — итоговая версия с временно отключённой ЮKassa
+// server.js — финальная версия с исправлением дублирования path
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -9,35 +9,20 @@ const { requestSmsCode, confirmSmsCode } = require('./wb-auth');
 const { getWarehouses, getStocks, updateStocks } = require('./wb-api');
 
 const app = express();
-const fs = require('fs');
-const path = require('path');
-
-app.get('/check-files', (req, res) => {
-  const rootFiles = fs.readdirSync(__dirname);
-  let publicFiles = 'папка public не найдена';
-  const publicPath = path.join(__dirname, 'public');
-  if (fs.existsSync(publicPath)) {
-    publicFiles = fs.readdirSync(publicPath).join(', ');
-  }
-  res.json({
-    rootFiles: rootFiles,
-    publicFiles: publicFiles
-  });
-});
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-// Общие middleware
 app.use(cors());
 app.use(bodyParser.json());
 
-// Раздача статических файлов Mini App (из папки public)
+// Раздача статики — абсолютный путь (path уже объявлен, поэтому не дублируем)
 const path = require('path');
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Подключение к базе данных
+// Подключение к БД
 const client = new Client({ connectionString: process.env.DATABASE_URL });
-// Функция, которая создаёт таблицы, если их ещё нет
+
+// Инициализация таблиц
 async function initDB() {
   try {
     await client.query(`
@@ -87,17 +72,14 @@ async function initDB() {
   }
 }
 
-// Подключаемся и сразу инициализируем таблицы
 client.connect()
   .then(() => {
     console.log('✅ Подключено к PostgreSQL');
-    return initDB(); // <-- создаём таблицы
+    return initDB();
   })
   .catch(err => console.error('❌ Ошибка подключения к БД:', err));
 
-// =====================================================
-//  Middleware авторизации Telegram
-// =====================================================
+// Middleware проверки Telegram InitData
 async function telegramAuth(req, res, next) {
   const authHeader = req.headers.authorization || '';
   const [authType, authData] = authHeader.split(' ');
@@ -125,7 +107,6 @@ async function telegramAuth(req, res, next) {
 //  АВТОРИЗАЦИЯ ЧЕРЕЗ СМС (Wildberries)
 // =====================================================
 
-// Шаг 1: Запросить SMS-код
 app.post('/auth/request-sms', telegramAuth, async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
@@ -152,7 +133,6 @@ app.post('/auth/request-sms', telegramAuth, async (req, res) => {
   }
 });
 
-// Шаг 2: Подтвердить SMS-код
 app.post('/auth/verify-sms', telegramAuth, async (req, res) => {
   const { code } = req.body;
   if (!code) return res.status(400).json({ error: 'Введите код' });
@@ -182,7 +162,6 @@ app.post('/auth/verify-sms', telegramAuth, async (req, res) => {
   }
 });
 
-// Проверка статуса авторизации
 app.get('/auth/status', telegramAuth, async (req, res) => {
   const user = await client.query(
     'SELECT wb_token FROM users WHERE telegram_id = $1',
@@ -196,7 +175,6 @@ app.get('/auth/status', telegramAuth, async (req, res) => {
 //  МАРШРУТЫ ДЛЯ РАБОТЫ С WILDBERRIES
 // =====================================================
 
-// Получить список складов
 app.get('/transfers/warehouses', telegramAuth, async (req, res) => {
   try {
     const user = await client.query(
@@ -214,7 +192,6 @@ app.get('/transfers/warehouses', telegramAuth, async (req, res) => {
   }
 });
 
-// Получить остатки по складу
 app.get('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
   const { warehouseId } = req.params;
   const { skus } = req.query;
@@ -237,7 +214,6 @@ app.get('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
   }
 });
 
-// Создать запрос на перемещение
 app.post('/transfers/create', telegramAuth, async (req, res) => {
   const { from_warehouse, to_warehouse, sku, amount } = req.body;
   if (!from_warehouse || !to_warehouse || !sku || !amount) {
@@ -257,7 +233,6 @@ app.post('/transfers/create', telegramAuth, async (req, res) => {
   }
 });
 
-// Список запросов на перемещение
 app.get('/transfers/list', telegramAuth, async (req, res) => {
   try {
     const result = await client.query(
@@ -270,33 +245,29 @@ app.get('/transfers/list', telegramAuth, async (req, res) => {
   }
 });
 
-// =====================================================
-//  ПЛАТЕЖИ — заглушка (временно без ЮKassa)
-// =====================================================
-const yooKassa = null; // отключено
-
-app.post('/payments/create', telegramAuth, async (req, res) => {
-  if (!yooKassa) {
-    return res.status(503).json({ error: 'Платёжный сервис временно недоступен' });
-  }
-  // ... код создания платежа (будет добавлен позже)
-});
-
+// Платежи — заглушка
+app.post('/payments/create', telegramAuth, (req, res) => res.status(503).json({ error: 'Платёжный сервис временно недоступен' }));
 app.get('/payments/history', telegramAuth, async (req, res) => {
   try {
-    const result = await client.query(
-      'SELECT * FROM payments WHERE user_id = $1 ORDER BY created_at DESC',
-      [req.telegramId]
-    );
+    const result = await client.query('SELECT * FROM payments WHERE user_id = $1 ORDER BY created_at DESC', [req.telegramId]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки истории' });
   }
 });
 
-// =====================================================
-//  ЗАПУСК СЕРВЕРА
-// =====================================================
+// Диагностический маршрут (временно, потом можно удалить)
+const fs = require('fs');
+app.get('/check-files', (req, res) => {
+  const rootFiles = fs.readdirSync(__dirname);
+  let publicFiles = 'папка public не найдена';
+  const publicPath = path.join(__dirname, 'public');
+  if (fs.existsSync(publicPath)) {
+    publicFiles = fs.readdirSync(publicPath).join(', ');
+  }
+  res.json({ rootFiles, publicFiles });
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
