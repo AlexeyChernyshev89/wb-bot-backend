@@ -9,6 +9,21 @@ const { requestSmsCode, confirmSmsCode } = require('./wb-auth');
 const { getWarehouses, getStocks, updateStocks } = require('./wb-api');
 
 const app = express();
+const fs = require('fs');
+const path = require('path');
+
+app.get('/check-files', (req, res) => {
+  const rootFiles = fs.readdirSync(__dirname);
+  let publicFiles = 'папка public не найдена';
+  const publicPath = path.join(__dirname, 'public');
+  if (fs.existsSync(publicPath)) {
+    publicFiles = fs.readdirSync(publicPath).join(', ');
+  }
+  res.json({
+    rootFiles: rootFiles,
+    publicFiles: publicFiles
+  });
+});
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
