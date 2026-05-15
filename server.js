@@ -17,7 +17,8 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // Раздача статических файлов Mini App (из папки public)
-app.use(express.static('public'));
+const path = require('path');
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Подключение к базе данных
 const client = new Client({ connectionString: process.env.DATABASE_URL });

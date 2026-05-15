@@ -1,5 +1,5 @@
 // middleware/authMiddleware.js
-const { validate } = require('@tma.js/init-data-node');
+const { validate } = require('@telegram-apps/init-data-node');
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 

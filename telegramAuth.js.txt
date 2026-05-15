@@ -1,0 +1,19 @@
+npm install @tma.js/sdk
+// src/utils/telegramAuth.js
+import { retrieveRawInitData } from '@tma.js/sdk';
+
+/**
+ * Простая обёртка для fetch, которая автоматически добавляет
+ * Telegram initData в заголовок Authorization.
+ */
+export async function apiWithAuth(url, options = {}) {
+  // 1. Получаем сырую строку initData из окружения Telegram.
+  const initDataRaw = retrieveRawInitData(); 
+
+  // 2. Создаём заголовок Authorization в формате 'tma <initData>'.
+  const headers = new Headers(options.headers);
+  headers.set('Authorization', `tma ${initDataRaw}`);
+
+  // 3. Отправляем запрос с нашим "секретным" заголовком.
+  return fetch(url, { ...options, headers });
+}
