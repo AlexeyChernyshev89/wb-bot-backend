@@ -1,4 +1,4 @@
-// server.js — финальная версия с исправлением дублирования path
+// server.js — финальная версия с тестовым режимом (TEST_MODE = true)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -7,6 +7,8 @@ const { Client } = require('pg');
 const { validate } = require('@telegram-apps/init-data-node');
 const { requestSmsCode, confirmSmsCode } = require('./wb-auth');
 const { getWarehouses, getStocks, updateStocks } = require('./wb-api');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,14 +17,13 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Раздача статики — абсолютный путь (path уже объявлен, поэтому не дублируем)
-const path = require('path');
+// Раздача статики (Mini App) — абсолютный путь
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Подключение к БД
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 
-// Инициализация таблиц
+// Автосоздание таблиц
 async function initDB() {
   try {
     await client.query(`
@@ -72,6 +73,7 @@ async function initDB() {
   }
 }
 
+// Инициализация БД и запуск сервера
 client.connect()
   .then(() => {
     console.log('✅ Подключено к PostgreSQL');
@@ -79,8 +81,17 @@ client.connect()
   })
   .catch(err => console.error('❌ Ошибка подключения к БД:', err));
 
+// Тестовый режим (отключает проверку Telegram)
+const TEST_MODE = true;
+
 // Middleware проверки Telegram InitData
 async function telegramAuth(req, res, next) {
+  // Если включён тестовый режим, пропускаем любого пользователя с ID 12345
+  if (TEST_MODE) {
+    req.telegramId = 12345;
+    return next();
+  }
+
   const authHeader = req.headers.authorization || '';
   const [authType, authData] = authHeader.split(' ');
 
@@ -256,8 +267,7 @@ app.get('/payments/history', telegramAuth, async (req, res) => {
   }
 });
 
-// Диагностический маршрут (временно, потом можно удалить)
-const fs = require('fs');
+// Диагностический маршрут (можно удалить после проверки)
 app.get('/check-files', (req, res) => {
   const rootFiles = fs.readdirSync(__dirname);
   let publicFiles = 'папка public не найдена';
