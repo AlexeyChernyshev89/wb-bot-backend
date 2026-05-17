@@ -19,7 +19,6 @@
         }
         .section { display: none; }
         .section.active { display: block; }
-
         .balance-cards {
             display: flex;
             gap: 12px;
@@ -43,7 +42,6 @@
             color: #666;
             margin-top: 4px;
         }
-
         .menu {
             list-style: none;
             padding: 0;
@@ -77,17 +75,8 @@
             margin-right: 12px;
             opacity: 0.7;
         }
-
         #content {
             min-height: 300px;
-        }
-        .back-link {
-            display: inline-block;
-            margin-bottom: 16px;
-            color: #007aff;
-            text-decoration: none;
-            font-size: 14px;
-            cursor: pointer;
         }
         input, select, button[type="submit"] {
             display: block;
@@ -121,268 +110,278 @@
     </style>
 </head>
 <body>
-    <div id="authSection" class="section active">
-        <h2>Вход в Wildberries</h2>
-        <div id="phoneStep">
-            <input type="tel" id="phoneInput" placeholder="+7 (999) 123-45-67" />
-            <button onclick="requestSms()">Получить код</button>
-            <p id="authError" class="error"></p>
-        </div>
-        <div id="codeStep" style="display:none;">
-            <p>Код отправлен на <span id="phoneDisplay"></span></p>
-            <input type="text" id="codeInput" placeholder="Код подтверждения" />
-            <button onclick="verifySms()">Подтвердить</button>
-            <p id="codeError" class="error"></p>
-        </div>
+    <div id="browserMessage" style="display:none; text-align:center; padding:40px;">
+        <h2>🚀 Откройте Mini App в Telegram</h2>
+        <p>Это приложение работает только внутри вашего бота.</p>
     </div>
 
-    <div id="mainSection" class="section">
-        <div class="balance-cards">
-            <div class="card">
-                <div class="value" id="balanceValue">0</div>
-                <div class="label">Баланс перемещений</div>
+    <div id="app" style="display:none;">
+        <!-- Экран авторизации -->
+        <div id="authSection" class="section active">
+            <h2>Вход в Wildberries</h2>
+            <div id="phoneStep">
+                <input type="tel" id="phoneInput" placeholder="+7 (999) 123-45-67" />
+                <button onclick="requestSms()">Получить код</button>
+                <p id="authError" class="error"></p>
             </div>
-            <div class="card">
-                <div class="value" id="reservedValue">0</div>
-                <div class="label">Зарезервировано перемещений</div>
+            <div id="codeStep" style="display:none;">
+                <p>Код отправлен на <span id="phoneDisplay"></span></p>
+                <input type="text" id="codeInput" placeholder="Код подтверждения" />
+                <button onclick="verifySms()">Подтвердить</button>
+                <p id="codeError" class="error"></p>
             </div>
         </div>
 
-        <ul class="menu">
-            <li><button onclick="navigate('list')">
-                <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                Список запросов на перемещение
-            </button></li>
-            <li><button onclick="navigate('create')">
-                <svg viewBox="0 0 512 512"><path d="M416 277.333H277.333V416h-42.666V277.333H96v-42.666h138.667V96h42.666v138.667H416v42.666z" fill="currentColor"/></svg>
-                Создать запрос
-            </button></li>
-            <li><button onclick="navigate('create-batch')">
-                <svg viewBox="0 0 512 512"><path d="M64 32h384c35.3 0 64 28.7 64 64v320c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V96c0-35.3 28.7-64 64-64zm0 64v64h64V96H64zm384 0H192v64h256V96zM64 224v64h64v-64H64zm384 0H192v64h256v-64zM64 352v64h64v-64H64zm384 0H192v64h256v-64z" fill="currentColor"/></svg>
-                Создать списком
-            </button></li>
-            <li><button onclick="navigate('pay')">
-                <svg viewBox="0 0 384 512"><path d="M96 32C78.3 32 64 46.3 64 64v192H32c-17.7 0-32 14.3-32 32s14.3 32 32 32h32v32H32c-17.7 0-32 14.3-32 32s14.3 32 32 32h32v32c0 17.7 14.3 32 32 32s32-14.3 32-32v-32h160c17.7 0 32-14.3 32-32s-14.3-32-32-32H128v-32h112c79.5 0 144-64.5 144-144S319.5 32 240 32H96zm144 224H128V96h112c44.2 0 80 35.8 80 80s-35.8 80-80 80z" fill="currentColor"/></svg>
-                Оплата
-            </button></li>
-            <li><button onclick="navigate('history')">
-                <svg viewBox="0 0 512 512"><path d="M160 144h288M160 256h288M160 368h288" stroke="currentColor" stroke-width="32" stroke-linecap="round"/><circle cx="80" cy="144" r="16" stroke="currentColor" stroke-width="32"/><circle cx="80" cy="256" r="16" stroke="currentColor" stroke-width="32"/><circle cx="80" cy="368" r="16" stroke="currentColor" stroke-width="32"/></svg>
-                История оплат
-            </button></li>
-            <li><button onclick="navigate('quotas')">
-                <svg viewBox="0 0 512 512"><path d="M128 496H48V304h80zm224 0h-80V208h80zm112 0h-80V96h80zm-224 0h-80V16h80z" fill="currentColor"/></svg>
-                Текущие квоты
-            </button></li>
-            <li><button onclick="navigate('stats')">
-                <svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="none"/><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-5h2v5zm4 0h-2v-3h2v3zm0-5h-2v-2h2v2zm4 5h-2V7h2v10z" fill="currentColor"/></svg>
-                Статистика перемещений
-            </button></li>
-        </ul>
+        <!-- Главный экран -->
+        <div id="mainSection" class="section">
+            <div class="balance-cards">
+                <div class="card">
+                    <div class="value" id="balanceValue">0</div>
+                    <div class="label">Баланс перемещений</div>
+                </div>
+                <div class="card">
+                    <div class="value" id="reservedValue">0</div>
+                    <div class="label">Зарезервировано перемещений</div>
+                </div>
+            </div>
 
-        <div id="content"></div>
+            <ul class="menu">
+                <li><button onclick="navigate('list')">
+                    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    Список запросов на перемещение
+                </button></li>
+                <li><button onclick="navigate('create')">
+                    <svg viewBox="0 0 512 512"><path d="M416 277.333H277.333V416h-42.666V277.333H96v-42.666h138.667V96h42.666v138.667H416v42.666z" fill="currentColor"/></svg>
+                    Создать запрос
+                </button></li>
+                <li><button onclick="navigate('create-batch')">
+                    <svg viewBox="0 0 512 512"><path d="M64 32h384c35.3 0 64 28.7 64 64v320c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V96c0-35.3 28.7-64 64-64zm0 64v64h64V96H64zm384 0H192v64h256V96zM64 224v64h64v-64H64zm384 0H192v64h256v-64zM64 352v64h64v-64H64zm384 0H192v64h256v-64z" fill="currentColor"/></svg>
+                    Создать списком
+                </button></li>
+                <li><button onclick="navigate('pay')">
+                    <svg viewBox="0 0 384 512"><path d="M96 32C78.3 32 64 46.3 64 64v192H32c-17.7 0-32 14.3-32 32s14.3 32 32 32h32v32H32c-17.7 0-32 14.3-32 32s14.3 32 32 32h32v32c0 17.7 14.3 32 32 32s32-14.3 32-32v-32h160c17.7 0 32-14.3 32-32s-14.3-32-32-32H128v-32h112c79.5 0 144-64.5 144-144S319.5 32 240 32H96zm144 224H128V96h112c44.2 0 80 35.8 80 80s-35.8 80-80 80z" fill="currentColor"/></svg>
+                    Оплата
+                </button></li>
+                <li><button onclick="navigate('history')">
+                    <svg viewBox="0 0 512 512"><path d="M160 144h288M160 256h288M160 368h288" stroke="currentColor" stroke-width="32" stroke-linecap="round"/><circle cx="80" cy="144" r="16" stroke="currentColor" stroke-width="32"/><circle cx="80" cy="256" r="16" stroke="currentColor" stroke-width="32"/><circle cx="80" cy="368" r="16" stroke="currentColor" stroke-width="32"/></svg>
+                    История оплат
+                </button></li>
+                <li><button onclick="navigate('quotas')">
+                    <svg viewBox="0 0 512 512"><path d="M128 496H48V304h80zm224 0h-80V208h80zm112 0h-80V96h80zm-224 0h-80V16h80z" fill="currentColor"/></svg>
+                    Текущие квоты
+                </button></li>
+                <li><button onclick="navigate('stats')">
+                    <svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="none"/><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-5h2v5zm4 0h-2v-3h2v3zm0-5h-2v-2h2v2zm4 5h-2V7h2v10z" fill="currentColor"/></svg>
+                    Статистика перемещений
+                </button></li>
+            </ul>
+
+            <div id="content"></div>
+        </div>
     </div>
 
     <script>
-        // Безопасное получение Telegram WebApp с заглушкой для браузера
-        const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
-            initData: 'test_init_data',  // заглушка для локального тестирования
-            ready: () => {}
-        };
-        tg.ready();
+        // Проверка Telegram
+        if (!window.Telegram || !window.Telegram.WebApp) {
+            document.getElementById('browserMessage').style.display = 'block';
+        } else {
+            document.getElementById('app').style.display = 'block';
+            const tg = window.Telegram.WebApp;
+            tg.ready();
 
-        // Формируем заголовок авторизации
-        const authHeaders = {
-            'Content-Type': 'application/json',
-            'Authorization': 'tma ' + tg.initData
-        };
+            const authHeaders = {
+                'Content-Type': 'application/json',
+                'Authorization': 'tma ' + tg.initData
+            };
 
-        // --- Авторизация ---
-        async function checkAuth() {
-            try {
-                const res = await fetch('/auth/status', { headers: authHeaders });
-                const data = await res.json();
-                if (data.authorized) {
-                    showMain();
-                } else {
+            // --- Авторизация ---
+            async function checkAuth() {
+                try {
+                    const res = await fetch('/auth/status', { headers: authHeaders });
+                    const data = await res.json();
+                    if (data.authorized) {
+                        showMain();
+                    } else {
+                        showAuth();
+                    }
+                } catch (e) {
                     showAuth();
                 }
-            } catch (e) {
-                showAuth();
             }
-        }
 
-        function showAuth() {
-            document.getElementById('authSection').classList.add('active');
-            document.getElementById('mainSection').classList.remove('active');
-            document.getElementById('phoneStep').style.display = 'block';
-            document.getElementById('codeStep').style.display = 'none';
-        }
-
-        function showMain() {
-            document.getElementById('authSection').classList.remove('active');
-            document.getElementById('mainSection').classList.add('active');
-            loadBalance();
-            navigate('list');
-        }
-
-        async function requestSms() {
-            const phone = document.getElementById('phoneInput').value.trim();
-            if (!phone) return;
-            document.getElementById('authError').textContent = '';
-            const res = await fetch('/auth/request-sms', {
-                method: 'POST',
-                headers: authHeaders,
-                body: JSON.stringify({ phone })
-            });
-            const data = await res.json();
-            if (data.success) {
-                document.getElementById('phoneDisplay').textContent = phone;
-                document.getElementById('phoneStep').style.display = 'none';
-                document.getElementById('codeStep').style.display = 'block';
-            } else {
-                document.getElementById('authError').textContent = data.error || 'Ошибка отправки SMS';
+            function showAuth() {
+                document.getElementById('authSection').classList.add('active');
+                document.getElementById('mainSection').classList.remove('active');
+                document.getElementById('phoneStep').style.display = 'block';
+                document.getElementById('codeStep').style.display = 'none';
             }
-        }
 
-        async function verifySms() {
-            const code = document.getElementById('codeInput').value.trim();
-            if (!code) return;
-            document.getElementById('codeError').textContent = '';
-            const res = await fetch('/auth/verify-sms', {
-                method: 'POST',
-                headers: authHeaders,
-                body: JSON.stringify({ code })
-            });
-            const data = await res.json();
-            if (data.success) {
-                showMain();
-            } else {
-                document.getElementById('codeError').textContent = data.error || 'Неверный код';
+            function showMain() {
+                document.getElementById('authSection').classList.remove('active');
+                document.getElementById('mainSection').classList.add('active');
+                loadBalance();
+                navigate('list');
             }
-        }
 
-        function loadBalance() {
-            document.getElementById('balanceValue').textContent = '0';
-            document.getElementById('reservedValue').textContent = '0';
-        }
-
-        // --- Навигация ---
-        function navigate(section) {
-            const content = document.getElementById('content');
-            switch (section) {
-                case 'list': loadTransferList(content); break;
-                case 'create': loadCreateForm(content); break;
-                case 'create-batch': content.innerHTML = '<h3>Создать списком</h3><p>Функция будет доступна позже.</p>'; break;
-                case 'pay': content.innerHTML = '<h3>Оплата</h3><p>Платёжный сервис временно недоступен.</p>'; break;
-                case 'history': loadPaymentHistory(content); break;
-                case 'quotas': content.innerHTML = '<h3>Текущие квоты</h3><p>Информация о квотах появится после интеграции с API Wildberries.</p>'; break;
-                case 'stats': content.innerHTML = '<h3>Статистика перемещений</h3><p>Статистика будет доступна позже.</p>'; break;
-                default: content.innerHTML = '';
-            }
-        }
-
-        async function loadTransferList(container) {
-            container.innerHTML = '<h3>Список запросов на перемещение</h3><div id="transferTable"></div>';
-            const tableDiv = document.getElementById('transferTable');
-            try {
-                const res = await fetch('/transfers/list', { headers: authHeaders });
-                if (!res.ok) throw new Error('Ошибка загрузки');
-                const requests = await res.json();
-                if (requests.length === 0) {
-                    tableDiv.innerHTML = '<p>Нет запросов.</p>';
-                    return;
-                }
-                let html = '<table><tr><th>ID</th><th>Откуда</th><th>Куда</th><th>SKU</th><th>Кол-во</th><th>Статус</th></tr>';
-                requests.forEach(r => {
-                    html += `<tr><td>${r.id}</td><td>${r.from_warehouse}</td><td>${r.to_warehouse}</td><td>${r.sku}</td><td>${r.amount}</td><td>${r.status}</td></tr>`;
-                });
-                html += '</table>';
-                tableDiv.innerHTML = html;
-            } catch (e) {
-                tableDiv.innerHTML = `<p class="error">${e.message}</p>`;
-            }
-        }
-
-        async function loadCreateForm(container) {
-            container.innerHTML = `
-                <h3>Создать запрос</h3>
-                <div id="createFormContainer">Загрузка складов...</div>
-            `;
-            const formContainer = document.getElementById('createFormContainer');
-            try {
-                const whRes = await fetch('/transfers/warehouses', { headers: authHeaders });
-                if (!whRes.ok) throw new Error('Не удалось получить список складов');
-                const warehouses = await whRes.json();
-                let options = warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join('');
-                formContainer.innerHTML = `
-                    <label>Склад отправитель</label>
-                    <select id="fromWh">${options}</select>
-                    <label>Склад получатель</label>
-                    <select id="toWh">${options}</select>
-                    <label>SKU товара</label>
-                    <input type="text" id="sku" placeholder="Артикул">
-                    <label>Количество</label>
-                    <input type="number" id="amount" placeholder="1">
-                    <button onclick="submitCreate()">Отправить</button>
-                    <p id="createError" class="error"></p>
-                `;
-            } catch (e) {
-                formContainer.innerHTML = `<p class="error">${e.message}</p>`;
-            }
-        }
-
-        async function submitCreate() {
-            const from = document.getElementById('fromWh').value;
-            const to = document.getElementById('toWh').value;
-            const sku = document.getElementById('sku').value.trim();
-            const amount = parseInt(document.getElementById('amount').value, 10);
-            const errorEl = document.getElementById('createError');
-            errorEl.textContent = '';
-            if (!from || !to || !sku || !amount) {
-                errorEl.textContent = 'Заполните все поля';
-                return;
-            }
-            try {
-                const res = await fetch('/transfers/create', {
+            async function requestSms() {
+                const phone = document.getElementById('phoneInput').value.trim();
+                if (!phone) return;
+                document.getElementById('authError').textContent = '';
+                const res = await fetch('/auth/request-sms', {
                     method: 'POST',
                     headers: authHeaders,
-                    body: JSON.stringify({ from_warehouse: from, to_warehouse: to, sku, amount })
+                    body: JSON.stringify({ phone })
                 });
                 const data = await res.json();
                 if (data.success) {
-                    alert('Запрос создан!');
-                    navigate('list');
+                    document.getElementById('phoneDisplay').textContent = phone;
+                    document.getElementById('phoneStep').style.display = 'none';
+                    document.getElementById('codeStep').style.display = 'block';
                 } else {
-                    errorEl.textContent = data.error || 'Ошибка создания запроса';
+                    document.getElementById('authError').textContent = data.error || 'Ошибка отправки SMS';
                 }
-            } catch (e) {
-                errorEl.textContent = 'Ошибка сети';
             }
-        }
 
-        async function loadPaymentHistory(container) {
-            container.innerHTML = '<h3>История оплат</h3><div id="payHistoryTable"></div>';
-            const tableDiv = document.getElementById('payHistoryTable');
-            try {
-                const res = await fetch('/payments/history', { headers: authHeaders });
-                if (!res.ok) throw new Error('Ошибка загрузки');
-                const payments = await res.json();
-                if (payments.length === 0) {
-                    tableDiv.innerHTML = '<p>Нет платежей.</p>';
+            async function verifySms() {
+                const code = document.getElementById('codeInput').value.trim();
+                if (!code) return;
+                document.getElementById('codeError').textContent = '';
+                const res = await fetch('/auth/verify-sms', {
+                    method: 'POST',
+                    headers: authHeaders,
+                    body: JSON.stringify({ code })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showMain();
+                } else {
+                    document.getElementById('codeError').textContent = data.error || 'Неверный код';
+                }
+            }
+
+            function loadBalance() {
+                document.getElementById('balanceValue').textContent = '0';
+                document.getElementById('reservedValue').textContent = '0';
+            }
+
+            // --- Навигация ---
+            function navigate(section) {
+                const content = document.getElementById('content');
+                switch (section) {
+                    case 'list': loadTransferList(content); break;
+                    case 'create': loadCreateForm(content); break;
+                    case 'create-batch': content.innerHTML = '<h3>Создать списком</h3><p>Функция будет доступна позже.</p>'; break;
+                    case 'pay': content.innerHTML = '<h3>Оплата</h3><p>Платёжный сервис временно недоступен.</p>'; break;
+                    case 'history': loadPaymentHistory(content); break;
+                    case 'quotas': content.innerHTML = '<h3>Текущие квоты</h3><p>Информация о квотах появится после интеграции с API Wildberries.</p>'; break;
+                    case 'stats': content.innerHTML = '<h3>Статистика перемещений</h3><p>Статистика будет доступна позже.</p>'; break;
+                    default: content.innerHTML = '';
+                }
+            }
+
+            async function loadTransferList(container) {
+                container.innerHTML = '<h3>Список запросов на перемещение</h3><div id="transferTable"></div>';
+                const tableDiv = document.getElementById('transferTable');
+                try {
+                    const res = await fetch('/transfers/list', { headers: authHeaders });
+                    if (!res.ok) throw new Error('Ошибка загрузки');
+                    const requests = await res.json();
+                    if (requests.length === 0) {
+                        tableDiv.innerHTML = '<p>Нет запросов.</p>';
+                        return;
+                    }
+                    let html = '<table><tr><th>ID</th><th>Откуда</th><th>Куда</th><th>SKU</th><th>Кол-во</th><th>Статус</th></tr>';
+                    requests.forEach(r => {
+                        html += `<tr><td>${r.id}</td><td>${r.from_warehouse}</td><td>${r.to_warehouse}</td><td>${r.sku}</td><td>${r.amount}</td><td>${r.status}</td></tr>`;
+                    });
+                    html += '</table>';
+                    tableDiv.innerHTML = html;
+                } catch (e) {
+                    tableDiv.innerHTML = `<p class="error">${e.message}</p>`;
+                }
+            }
+
+            async function loadCreateForm(container) {
+                container.innerHTML = `
+                    <h3>Создать запрос</h3>
+                    <div id="createFormContainer">Загрузка складов...</div>
+                `;
+                const formContainer = document.getElementById('createFormContainer');
+                try {
+                    const whRes = await fetch('/transfers/warehouses', { headers: authHeaders });
+                    if (!whRes.ok) throw new Error('Не удалось получить список складов');
+                    const warehouses = await whRes.json();
+                    let options = warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join('');
+                    formContainer.innerHTML = `
+                        <label>Склад отправитель</label>
+                        <select id="fromWh">${options}</select>
+                        <label>Склад получатель</label>
+                        <select id="toWh">${options}</select>
+                        <label>SKU товара</label>
+                        <input type="text" id="sku" placeholder="Артикул">
+                        <label>Количество</label>
+                        <input type="number" id="amount" placeholder="1">
+                        <button onclick="submitCreate()">Отправить</button>
+                        <p id="createError" class="error"></p>
+                    `;
+                } catch (e) {
+                    formContainer.innerHTML = `<p class="error">${e.message}</p>`;
+                }
+            }
+
+            async function submitCreate() {
+                const from = document.getElementById('fromWh').value;
+                const to = document.getElementById('toWh').value;
+                const sku = document.getElementById('sku').value.trim();
+                const amount = parseInt(document.getElementById('amount').value, 10);
+                const errorEl = document.getElementById('createError');
+                errorEl.textContent = '';
+                if (!from || !to || !sku || !amount) {
+                    errorEl.textContent = 'Заполните все поля';
                     return;
                 }
-                let html = '<table><tr><th>ID</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr>';
-                payments.forEach(p => {
-                    html += `<tr><td>${p.id}</td><td>${p.amount} ₽</td><td>${p.status}</td><td>${p.created_at}</td></tr>`;
-                });
-                html += '</table>';
-                tableDiv.innerHTML = html;
-            } catch (e) {
-                tableDiv.innerHTML = `<p class="error">${e.message}</p>`;
+                try {
+                    const res = await fetch('/transfers/create', {
+                        method: 'POST',
+                        headers: authHeaders,
+                        body: JSON.stringify({ from_warehouse: from, to_warehouse: to, sku, amount })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        alert('Запрос создан!');
+                        navigate('list');
+                    } else {
+                        errorEl.textContent = data.error || 'Ошибка создания запроса';
+                    }
+                } catch (e) {
+                    errorEl.textContent = 'Ошибка сети';
+                }
             }
-        }
 
-        checkAuth();
+            async function loadPaymentHistory(container) {
+                container.innerHTML = '<h3>История оплат</h3><div id="payHistoryTable"></div>';
+                const tableDiv = document.getElementById('payHistoryTable');
+                try {
+                    const res = await fetch('/payments/history', { headers: authHeaders });
+                    if (!res.ok) throw new Error('Ошибка загрузки');
+                    const payments = await res.json();
+                    if (payments.length === 0) {
+                        tableDiv.innerHTML = '<p>Нет платежей.</p>';
+                        return;
+                    }
+                    let html = '<table><tr><th>ID</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr>';
+                    payments.forEach(p => {
+                        html += `<tr><td>${p.id}</td><td>${p.amount} ₽</td><td>${p.status}</td><td>${p.created_at}</td></tr>`;
+                    });
+                    html += '</table>';
+                    tableDiv.innerHTML = html;
+                } catch (e) {
+                    tableDiv.innerHTML = `<p class="error">${e.message}</p>`;
+                }
+            }
+
+            checkAuth();
+        }
     </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-// server.js — финальная версия с тестовым режимом (TEST_MODE = true)
+// server.js — финальная версия без тестового режима
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -16,8 +16,6 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 app.use(cors());
 app.use(bodyParser.json());
-
-// Раздача статики (Mini App) — абсолютный путь
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Подключение к БД
@@ -73,7 +71,6 @@ async function initDB() {
   }
 }
 
-// Инициализация БД и запуск сервера
 client.connect()
   .then(() => {
     console.log('✅ Подключено к PostgreSQL');
@@ -81,17 +78,10 @@ client.connect()
   })
   .catch(err => console.error('❌ Ошибка подключения к БД:', err));
 
-// Тестовый режим (отключает проверку Telegram)
-const TEST_MODE = true;
-
+// =====================================================
 // Middleware проверки Telegram InitData
+// =====================================================
 async function telegramAuth(req, res, next) {
-  // Если включён тестовый режим, пропускаем любого пользователя с ID 12345
-  if (TEST_MODE) {
-    req.telegramId = 12345;
-    return next();
-  }
-
   const authHeader = req.headers.authorization || '';
   const [authType, authData] = authHeader.split(' ');
 
@@ -118,68 +108,86 @@ async function telegramAuth(req, res, next) {
 //  АВТОРИЗАЦИЯ ЧЕРЕЗ СМС (Wildberries)
 // =====================================================
 
+// Запрос SMS
 app.post('/auth/request-sms', telegramAuth, async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
 
-  const existing = await client.query(
-    'SELECT wb_token FROM users WHERE telegram_id = $1',
-    [req.telegramId]
-  );
-  if (existing.rows.length > 0 && existing.rows[0].wb_token) {
-    return res.json({ success: false, already_authorized: true, message: 'Вы уже авторизованы в Wildberries' });
-  }
-
-  const result = await requestSmsCode(phone);
-  if (result.success) {
-    await client.query(
-      `INSERT INTO sms_requests (telegram_id, phone, request_id, created_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (telegram_id) DO UPDATE SET phone = $2, request_id = $3, created_at = NOW()`,
-      [req.telegramId, phone, result.requestId]
+  try {
+    const existing = await client.query(
+      'SELECT wb_token FROM users WHERE telegram_id = $1',
+      [req.telegramId]
     );
-    res.json({ success: true, message: 'Код отправлен на номер ' + phone });
-  } else {
-    res.status(400).json({ success: false, error: result.error });
+    if (existing.rows.length > 0 && existing.rows[0].wb_token) {
+      return res.json({ success: false, already_authorized: true, message: 'Вы уже авторизованы в Wildberries' });
+    }
+
+    const result = await requestSmsCode(phone);
+    if (result.success) {
+      await client.query(
+        `INSERT INTO sms_requests (telegram_id, phone, request_id, created_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (telegram_id) DO UPDATE SET phone = $2, request_id = $3, created_at = NOW()`,
+        [req.telegramId, phone, result.requestId]
+      );
+      res.json({ success: true, message: 'Код отправлен на номер ' + phone });
+    } else {
+      res.status(400).json({ success: false, error: result.error || 'Не удалось отправить SMS' });
+    }
+  } catch (err) {
+    console.error('Ошибка в /auth/request-sms:', err);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера при отправке SMS' });
   }
 });
 
+// Подтверждение SMS
 app.post('/auth/verify-sms', telegramAuth, async (req, res) => {
   const { code } = req.body;
   if (!code) return res.status(400).json({ error: 'Введите код' });
 
-  const smsReq = await client.query(
-    'SELECT phone, request_id FROM sms_requests WHERE telegram_id = $1',
-    [req.telegramId]
-  );
-  if (smsReq.rows.length === 0) {
-    return res.status(400).json({ error: 'Сначала запросите код' });
-  }
-
-  const { phone, request_id } = smsReq.rows[0];
-  const result = await confirmSmsCode(phone, code, request_id);
-
-  if (result.success) {
-    await client.query(
-      `INSERT INTO users (telegram_id, phone, wb_token, updated_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (telegram_id) DO UPDATE SET phone = $2, wb_token = $3, updated_at = NOW()`,
-      [req.telegramId, phone, result.token]
+  try {
+    const smsReq = await client.query(
+      'SELECT phone, request_id FROM sms_requests WHERE telegram_id = $1',
+      [req.telegramId]
     );
-    await client.query('DELETE FROM sms_requests WHERE telegram_id = $1', [req.telegramId]);
-    res.json({ success: true, message: 'Авторизация в Wildberries успешно завершена' });
-  } else {
-    res.status(400).json({ success: false, error: result.error });
+    if (smsReq.rows.length === 0) {
+      return res.status(400).json({ error: 'Сначала запросите код' });
+    }
+
+    const { phone, request_id } = smsReq.rows[0];
+    const result = await confirmSmsCode(phone, code, request_id);
+
+    if (result.success) {
+      await client.query(
+        `INSERT INTO users (telegram_id, phone, wb_token, updated_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (telegram_id) DO UPDATE SET phone = $2, wb_token = $3, updated_at = NOW()`,
+        [req.telegramId, phone, result.token]
+      );
+      await client.query('DELETE FROM sms_requests WHERE telegram_id = $1', [req.telegramId]);
+      res.json({ success: true, message: 'Авторизация в Wildberries успешно завершена' });
+    } else {
+      res.status(400).json({ success: false, error: result.error || 'Неверный код' });
+    }
+  } catch (err) {
+    console.error('Ошибка в /auth/verify-sms:', err);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера при проверке кода' });
   }
 });
 
+// Статус авторизации
 app.get('/auth/status', telegramAuth, async (req, res) => {
-  const user = await client.query(
-    'SELECT wb_token FROM users WHERE telegram_id = $1',
-    [req.telegramId]
-  );
-  const authorized = user.rows.length > 0 && user.rows[0].wb_token !== null;
-  res.json({ authorized });
+  try {
+    const user = await client.query(
+      'SELECT wb_token FROM users WHERE telegram_id = $1',
+      [req.telegramId]
+    );
+    const authorized = user.rows.length > 0 && user.rows[0].wb_token !== null;
+    res.json({ authorized });
+  } catch (err) {
+    console.error('Ошибка в /auth/status:', err);
+    res.status(500).json({ error: 'Ошибка проверки статуса авторизации' });
+  }
 });
 
 // =====================================================
