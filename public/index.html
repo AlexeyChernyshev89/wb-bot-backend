@@ -179,16 +179,18 @@
             </button></li>
         </ul>
 
-        <div id="content">
-        </div>
+        <div id="content"></div>
     </div>
 
     <script>
-        // Инициализация Telegram WebApp
-        const tg = window.Telegram.WebApp;
+        // Безопасное получение Telegram WebApp с заглушкой для браузера
+        const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
+            initData: 'test_init_data',  // заглушка для локального тестирования
+            ready: () => {}
+        };
         tg.ready();
 
-        // Формируем корректный заголовок с реальной initData
+        // Формируем заголовок авторизации
         const authHeaders = {
             'Content-Type': 'application/json',
             'Authorization': 'tma ' + tg.initData
@@ -380,7 +382,6 @@
             }
         }
 
-        // Запуск
         checkAuth();
     </script>
 </body>
