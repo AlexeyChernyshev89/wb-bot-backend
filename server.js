@@ -1,4 +1,4 @@
-// server.js — финальная версия без тестового режима
+// server.js — финальная версия с поддержкой тестового режима
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -14,14 +14,21 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
+// -----------------------------------------------------
+// 1. ОСНОВНЫЕ MIDDLEWARE
+// -----------------------------------------------------
 app.use(cors());
 app.use(bodyParser.json());
+
+// Раздача статических файлов Mini App (из папки public)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Подключение к БД
+// -----------------------------------------------------
+// 2. БАЗА ДАННЫХ
+// -----------------------------------------------------
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 
-// Автосоздание таблиц
+// Функция создания таблиц (выполняется один раз при старте)
 async function initDB() {
   try {
     await client.query(`
@@ -71,6 +78,7 @@ async function initDB() {
   }
 }
 
+// Подключаемся к БД и сразу создаём таблицы
 client.connect()
   .then(() => {
     console.log('✅ Подключено к PostgreSQL');
@@ -78,10 +86,21 @@ client.connect()
   })
   .catch(err => console.error('❌ Ошибка подключения к БД:', err));
 
-// =====================================================
-// Middleware проверки Telegram InitData
-// =====================================================
+// -----------------------------------------------------
+// 3. ТЕСТОВЫЙ РЕЖИМ (отключает проверку Telegram)
+// -----------------------------------------------------
+const TEST_MODE = true; // Поставьте false, когда Mini App заработает через WebView
+
+// -----------------------------------------------------
+// 4. MIDDLEWARE АВТОРИЗАЦИИ TELEGRAM
+// -----------------------------------------------------
 async function telegramAuth(req, res, next) {
+  // В тестовом режиме пропускаем всех, используя фиктивный telegramId
+  if (TEST_MODE) {
+    req.telegramId = 12345;
+    return next();
+  }
+
   const authHeader = req.headers.authorization || '';
   const [authType, authData] = authHeader.split(' ');
 
@@ -104,22 +123,27 @@ async function telegramAuth(req, res, next) {
   }
 }
 
-// =====================================================
-//  АВТОРИЗАЦИЯ ЧЕРЕЗ СМС (Wildberries)
-// =====================================================
+// -----------------------------------------------------
+// 5. МАРШРУТЫ АВТОРИЗАЦИИ (SMS)
+// -----------------------------------------------------
 
-// Запрос SMS
+// Запросить код
 app.post('/auth/request-sms', telegramAuth, async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
 
   try {
+    // Проверим, возможно пользователь уже авторизован
     const existing = await client.query(
       'SELECT wb_token FROM users WHERE telegram_id = $1',
       [req.telegramId]
     );
     if (existing.rows.length > 0 && existing.rows[0].wb_token) {
-      return res.json({ success: false, already_authorized: true, message: 'Вы уже авторизованы в Wildberries' });
+      return res.json({
+        success: false,
+        already_authorized: true,
+        message: 'Вы уже авторизованы в Wildberries'
+      });
     }
 
     const result = await requestSmsCode(phone);
@@ -136,11 +160,11 @@ app.post('/auth/request-sms', telegramAuth, async (req, res) => {
     }
   } catch (err) {
     console.error('Ошибка в /auth/request-sms:', err);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера при отправке SMS' });
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
-// Подтверждение SMS
+// Подтвердить код
 app.post('/auth/verify-sms', telegramAuth, async (req, res) => {
   const { code } = req.body;
   if (!code) return res.status(400).json({ error: 'Введите код' });
@@ -158,20 +182,22 @@ app.post('/auth/verify-sms', telegramAuth, async (req, res) => {
     const result = await confirmSmsCode(phone, code, request_id);
 
     if (result.success) {
+      // Сохраняем токен WB в users
       await client.query(
         `INSERT INTO users (telegram_id, phone, wb_token, updated_at)
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (telegram_id) DO UPDATE SET phone = $2, wb_token = $3, updated_at = NOW()`,
         [req.telegramId, phone, result.token]
       );
+      // Удаляем временную запись SMS
       await client.query('DELETE FROM sms_requests WHERE telegram_id = $1', [req.telegramId]);
-      res.json({ success: true, message: 'Авторизация в Wildberries успешно завершена' });
+      res.json({ success: true, message: 'Авторизация в Wildberries успешна' });
     } else {
       res.status(400).json({ success: false, error: result.error || 'Неверный код' });
     }
   } catch (err) {
     console.error('Ошибка в /auth/verify-sms:', err);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера при проверке кода' });
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 });
 
@@ -186,14 +212,15 @@ app.get('/auth/status', telegramAuth, async (req, res) => {
     res.json({ authorized });
   } catch (err) {
     console.error('Ошибка в /auth/status:', err);
-    res.status(500).json({ error: 'Ошибка проверки статуса авторизации' });
+    res.status(500).json({ error: 'Ошибка проверки статуса' });
   }
 });
 
-// =====================================================
-//  МАРШРУТЫ ДЛЯ РАБОТЫ С WILDBERRIES
-// =====================================================
+// -----------------------------------------------------
+// 6. МАРШРУТЫ ДЛЯ РАБОТЫ С WILDBERRIES
+// -----------------------------------------------------
 
+// Список складов
 app.get('/transfers/warehouses', telegramAuth, async (req, res) => {
   try {
     const user = await client.query(
@@ -211,6 +238,7 @@ app.get('/transfers/warehouses', telegramAuth, async (req, res) => {
   }
 });
 
+// Остатки по складу
 app.get('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
   const { warehouseId } = req.params;
   const { skus } = req.query;
@@ -233,6 +261,7 @@ app.get('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
   }
 });
 
+// Создать запрос на перемещение
 app.post('/transfers/create', telegramAuth, async (req, res) => {
   const { from_warehouse, to_warehouse, sku, amount } = req.body;
   if (!from_warehouse || !to_warehouse || !sku || !amount) {
@@ -252,6 +281,7 @@ app.post('/transfers/create', telegramAuth, async (req, res) => {
   }
 });
 
+// Список запросов
 app.get('/transfers/list', telegramAuth, async (req, res) => {
   try {
     const result = await client.query(
@@ -264,18 +294,46 @@ app.get('/transfers/list', telegramAuth, async (req, res) => {
   }
 });
 
-// Платежи — заглушка
-app.post('/payments/create', telegramAuth, (req, res) => res.status(503).json({ error: 'Платёжный сервис временно недоступен' }));
+// Удаление запроса (добавил по вашей просьбе)
+app.delete('/transfers/:id', telegramAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await client.query(
+      'DELETE FROM transfer_requests WHERE id = $1 AND user_id = $2',
+      [id, req.telegramId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Запрос не найден' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка удаления' });
+  }
+});
+
+// -----------------------------------------------------
+// 7. ПЛАТЕЖИ (заглушка)
+// -----------------------------------------------------
+app.post('/payments/create', telegramAuth, (req, res) => {
+  res.status(503).json({ error: 'Платёжный сервис временно недоступен' });
+});
+
 app.get('/payments/history', telegramAuth, async (req, res) => {
   try {
-    const result = await client.query('SELECT * FROM payments WHERE user_id = $1 ORDER BY created_at DESC', [req.telegramId]);
+    const result = await client.query(
+      'SELECT * FROM payments WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.telegramId]
+    );
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки истории' });
   }
 });
 
-// Диагностический маршрут (можно удалить после проверки)
+// -----------------------------------------------------
+// 8. ДИАГНОСТИЧЕСКИЙ МАРШРУТ (опционально)
+// -----------------------------------------------------
 app.get('/check-files', (req, res) => {
   const rootFiles = fs.readdirSync(__dirname);
   let publicFiles = 'папка public не найдена';
@@ -286,6 +344,9 @@ app.get('/check-files', (req, res) => {
   res.json({ rootFiles, publicFiles });
 });
 
+// -----------------------------------------------------
+// 9. ЗАПУСК СЕРВЕРА
+// -----------------------------------------------------
 app.listen(PORT, () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
