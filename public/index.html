@@ -1,29 +1,387 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <title>Test</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WB Supply Helper</title>
+    <style>
+        :root {
+            --tg-theme-bg-color: #ffffff;
+            --tg-theme-text-color: #000000;
+            --tg-theme-button-color: #2ea6ff;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+            margin: 0;
+            padding: 16px;
+        }
+        .section { display: none; }
+        .section.active { display: block; }
+        .balance-cards {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .card {
+            flex: 1;
+            padding: 16px;
+            border-radius: 12px;
+            background: #f5f5f5;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .card .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #1a1a1a;
+        }
+        .card .label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+        .menu {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 20px 0;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+            background: #fff;
+        }
+        .menu li {
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .menu li:last-child { border-bottom: none; }
+        .menu button {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            padding: 12px 16px;
+            background: none;
+            border: none;
+            font-size: 15px;
+            text-align: left;
+            color: inherit;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .menu button:hover { background: #f9fafb; }
+        .menu button svg {
+            width: 20px;
+            height: 20px;
+            margin-right: 12px;
+            opacity: 0.7;
+        }
+        #content {
+            min-height: 300px;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 16px;
+            color: #007aff;
+            text-decoration: none;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        input, select, button[type="submit"] {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 15px;
+            box-sizing: border-box;
+        }
+        button[type="submit"] {
+            background: #007aff;
+            color: white;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 13px;
+        }
+        .error { color: red; font-size: 14px; }
+    </style>
 </head>
 <body>
-    <h1>Результат проверки:</h1>
-    <pre id="log"></pre>
+    <div id="authSection" class="section active">
+        <h2>Вход в Wildberries</h2>
+        <div id="phoneStep">
+            <input type="tel" id="phoneInput" placeholder="+7 (999) 123-45-67" />
+            <button onclick="requestSms()">Получить код</button>
+            <p id="authError" class="error"></p>
+        </div>
+        <div id="codeStep" style="display:none;">
+            <p>Код отправлен на <span id="phoneDisplay"></span></p>
+            <input type="text" id="codeInput" placeholder="Код подтверждения" />
+            <button onclick="verifySms()">Подтвердить</button>
+            <p id="codeError" class="error"></p>
+        </div>
+    </div>
+
+    <div id="mainSection" class="section">
+        <div class="balance-cards">
+            <div class="card">
+                <div class="value" id="balanceValue">0</div>
+                <div class="label">Баланс перемещений</div>
+            </div>
+            <div class="card">
+                <div class="value" id="reservedValue">0</div>
+                <div class="label">Зарезервировано перемещений</div>
+            </div>
+        </div>
+
+        <ul class="menu">
+            <li><button onclick="navigate('list')">
+                <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                Список запросов на перемещение
+            </button></li>
+            <li><button onclick="navigate('pay')">
+                <svg viewBox="0 0 384 512"><path d="M96 32C78.3 32 64 46.3 64 64v192H32c-17.7 0-32 14.3-32 32s14.3 32 32 32h32v32H32c-17.7 0-32 14.3-32 32s14.3 32 32 32h32v32c0 17.7 14.3 32 32 32s32-14.3 32-32v-32h160c17.7 0 32-14.3 32-32s-14.3-32-32-32H128v-32h112c79.5 0 144-64.5 144-144S319.5 32 240 32H96zm144 224H128V96h112c44.2 0 80 35.8 80 80s-35.8 80-80 80z" fill="currentColor"/></svg>
+                Оплата
+            </button></li>
+            <li><button onclick="navigate('history')">
+                <svg viewBox="0 0 512 512"><path d="M160 144h288M160 256h288M160 368h288" stroke="currentColor" stroke-width="32" stroke-linecap="round"/><circle cx="80" cy="144" r="16" stroke="currentColor" stroke-width="32"/><circle cx="80" cy="256" r="16" stroke="currentColor" stroke-width="32"/><circle cx="80" cy="368" r="16" stroke="currentColor" stroke-width="32"/></svg>
+                История оплат
+            </button></li>
+            <li><button onclick="navigate('quotas')">
+                <svg viewBox="0 0 512 512"><path d="M128 496H48V304h80zm224 0h-80V208h80zm112 0h-80V96h80zm-224 0h-80V16h80z" fill="currentColor"/></svg>
+                Текущие квоты
+            </button></li>
+        </ul>
+
+        <div id="content"></div>
+    </div>
+
     <script>
-        var log = document.getElementById('log');
-        log.textContent = 'Проверка Telegram.WebApp...\n';
-        try {
-            if (window.Telegram && window.Telegram.WebApp) {
-                var tg = window.Telegram.WebApp;
-                log.textContent += '✅ Telegram.WebApp найден!\n';
-                log.textContent += 'initData: ' + tg.initData + '\n';
-                log.textContent += 'user id: ' + (tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : 'не определён');
-            } else {
-                log.textContent += '❌ Telegram.WebApp НЕ найден.\n';
-                log.textContent += 'window.Telegram: ' + (typeof window.Telegram) + '\n';
-                log.textContent += 'User-Agent: ' + navigator.userAgent;
-            }
-        } catch (e) {
-            log.textContent += 'ОШИБКА: ' + e.message;
+        // Заглушка для работы без Telegram WebView
+        const tg = window.Telegram?.WebApp ?? {
+            initData: 'test_init_data',
+            ready: () => {}
+        };
+        if (window.Telegram?.WebApp) {
+            window.Telegram.WebApp.ready();
         }
+
+        const authHeaders = {
+            'Content-Type': 'application/json',
+            'Authorization': 'tma ' + tg.initData
+        };
+
+        async function checkAuth() {
+            try {
+                const res = await fetch('/auth/status', { headers: authHeaders });
+                const data = await res.json();
+                if (data.authorized) {
+                    showMain();
+                } else {
+                    showAuth();
+                }
+            } catch (e) {
+                showAuth();
+            }
+        }
+
+        function showAuth() {
+            document.getElementById('authSection').classList.add('active');
+            document.getElementById('mainSection').classList.remove('active');
+            document.getElementById('phoneStep').style.display = 'block';
+            document.getElementById('codeStep').style.display = 'none';
+        }
+
+        function showMain() {
+            document.getElementById('authSection').classList.remove('active');
+            document.getElementById('mainSection').classList.add('active');
+            loadBalance();
+            navigate('list');
+        }
+
+        async function requestSms() {
+            const phone = document.getElementById('phoneInput').value.trim();
+            if (!phone) return;
+            document.getElementById('authError').textContent = '';
+            const res = await fetch('/auth/request-sms', {
+                method: 'POST',
+                headers: authHeaders,
+                body: JSON.stringify({ phone })
+            });
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('phoneDisplay').textContent = phone;
+                document.getElementById('phoneStep').style.display = 'none';
+                document.getElementById('codeStep').style.display = 'block';
+            } else {
+                document.getElementById('authError').textContent = data.error || 'Ошибка отправки SMS';
+            }
+        }
+
+        async function verifySms() {
+            const code = document.getElementById('codeInput').value.trim();
+            if (!code) return;
+            document.getElementById('codeError').textContent = '';
+            const res = await fetch('/auth/verify-sms', {
+                method: 'POST',
+                headers: authHeaders,
+                body: JSON.stringify({ code })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showMain();
+            } else {
+                document.getElementById('codeError').textContent = data.error || 'Неверный код';
+            }
+        }
+
+        function loadBalance() {
+            document.getElementById('balanceValue').textContent = '0';
+            document.getElementById('reservedValue').textContent = '0';
+        }
+
+        function navigate(section) {
+            const content = document.getElementById('content');
+            switch (section) {
+                case 'list': loadTransferList(content); break;
+                case 'pay': loadPaymentPage(content); break;
+                case 'history': loadPaymentHistory(content); break;
+                case 'quotas': loadQuotas(content); break;
+                default: content.innerHTML = '';
+            }
+        }
+
+        async function loadTransferList(container) {
+            container.innerHTML = '<h3>Список запросов на перемещение</h3><button onclick="navigate(\'create\')">+ Создать запрос</button><div id="transferTable"></div>';
+            const tableDiv = document.getElementById('transferTable');
+            try {
+                const res = await fetch('/transfers/list', { headers: authHeaders });
+                if (!res.ok) throw new Error('Ошибка загрузки');
+                const requests = await res.json();
+                if (requests.length === 0) {
+                    tableDiv.innerHTML = '<p>Нет запросов.</p>';
+                    return;
+                }
+                let html = '<table><tr><th>ID</th><th>Откуда</th><th>Куда</th><th>SKU</th><th>Кол-во</th><th>Статус</th><th></th></tr>';
+                requests.forEach(r => {
+                    html += `<tr><td>${r.id}</td><td>${r.from_warehouse}</td><td>${r.to_warehouse}</td><td>${r.sku}</td><td>${r.amount}</td><td>${r.status}</td><td><button onclick="deleteTransfer(${r.id})">🗑️</button></td></tr>`;
+                });
+                html += '</table>';
+                tableDiv.innerHTML = html;
+            } catch (e) {
+                tableDiv.innerHTML = `<p class="error">${e.message}</p>`;
+            }
+        }
+
+        async function deleteTransfer(id) {
+            try {
+                const res = await fetch(`/transfers/${id}`, { method: 'DELETE', headers: authHeaders });
+                if (res.ok) navigate('list');
+                else alert('Ошибка удаления');
+            } catch (e) {
+                alert('Ошибка сети');
+            }
+        }
+
+        // Функция для создания запроса (простая версия, можно расширить)
+        window.createTransfer = async function() {
+            const from = document.getElementById('fromWh').value;
+            const to = document.getElementById('toWh').value;
+            const sku = document.getElementById('sku').value.trim();
+            const amount = parseInt(document.getElementById('amount').value, 10);
+            if (!from || !to || !sku || !amount) {
+                alert('Заполните все поля');
+                return;
+            }
+            try {
+                const res = await fetch('/transfers/create', {
+                    method: 'POST',
+                    headers: authHeaders,
+                    body: JSON.stringify({ from_warehouse: from, to_warehouse: to, sku, amount })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    navigate('list');
+                } else {
+                    alert(data.error || 'Ошибка');
+                }
+            } catch (e) {
+                alert('Ошибка сети');
+            }
+        };
+
+        function loadPaymentPage(container) {
+            container.innerHTML = `
+                <h3>Оплата</h3>
+                <input type="email" id="email" placeholder="E-Mail для чеков" />
+                <div id="tariffs"></div>
+                <button onclick="pay()">Оплатить</button>
+            `;
+            const tariffs = [
+                { units: 100, price: 200 },
+                { units: 200, price: 400 },
+                { units: 500, price: 1000 },
+                { units: 1000, price: 2000 },
+                { units: 2000, price: 4000 },
+                { units: 5000, price: 10000 },
+                { units: 10000, price: 20000 },
+                { units: 20000, price: 40000 }
+            ];
+            const tariffsDiv = document.getElementById('tariffs');
+            tariffs.forEach(t => {
+                tariffsDiv.innerHTML += `<label><input type="radio" name="tariff" value="${t.units}" data-price="${t.price}" /> ${t.units} ед. — ${t.price} ₽</label><br/>`;
+            });
+        }
+
+        window.pay = async function() {
+            const email = document.getElementById('email').value.trim();
+            if (!email) { alert('Введите E-Mail'); return; }
+            const selected = document.querySelector('input[name="tariff"]:checked');
+            if (!selected) { alert('Выберите тариф'); return; }
+            const units = selected.value;
+            const price = selected.dataset.price;
+            // Заглушка: в реальности нужно вызвать /payments/create
+            alert(`Платёж на сумму ${price} ₽ для ${units} единиц. (ЮKassa не подключена)`);
+        };
+
+        async function loadPaymentHistory(container) {
+            container.innerHTML = '<h3>История оплат</h3><div id="payHistoryTable"></div>';
+            const tableDiv = document.getElementById('payHistoryTable');
+            try {
+                const res = await fetch('/payments/history', { headers: authHeaders });
+                if (!res.ok) throw new Error('Ошибка загрузки');
+                const payments = await res.json();
+                if (payments.length === 0) {
+                    tableDiv.innerHTML = '<p>Нет платежей.</p>';
+                    return;
+                }
+                let html = '<table><tr><th>ID</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr>';
+                payments.forEach(p => {
+                    html += `<tr><td>${p.id}</td><td>${p.amount} ₽</td><td>${p.status}</td><td>${p.created_at}</td></tr>`;
+                });
+                html += '</table>';
+                tableDiv.innerHTML = html;
+            } catch (e) {
+                tableDiv.innerHTML = `<p class="error">${e.message}</p>`;
+            }
+        }
+
+        function loadQuotas(container) {
+            container.innerHTML = '<h3>Текущие квоты</h3><p>Информация о квотах будет доступна после интеграции с API Wildberries.</p>';
+        }
+
+        checkAuth();
     </script>
 </body>
 </html>
