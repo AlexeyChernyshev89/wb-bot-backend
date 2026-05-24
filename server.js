@@ -537,6 +537,17 @@ app.post('/debug-auth', (req, res) => {
   });
 });
 
+
+// ─── Ручной запуск настройки бота (вызвать один раз после деплоя) ─────────────
+app.get('/setup-bot', async (req, res) => {
+  try {
+    await setupBot();
+    res.json({ success: true, message: 'Бот настроен. Проверьте логи Railway.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
