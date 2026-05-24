@@ -1,290 +1,374 @@
-// server.js — финальная версия с поддержкой тестового режима
+// server.js — WB Supply Helper Backend
+// Авторизация продавца: Bearer API-токен из ЛК Wildberries
+// Telegram Mini App: валидация initData через @telegram-apps/init-data-node
+
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
+const express    = require('express');
+const cors       = require('cors');
 const bodyParser = require('body-parser');
 const { Client } = require('pg');
 const { validate } = require('@telegram-apps/init-data-node');
-const { requestSmsCode, confirmSmsCode } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks } = require('./wb-api');
+const { validateWbToken, decodeWbToken } = require('./wb-auth');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards } = require('./wb-api');
 const path = require('path');
-const fs = require('fs');
+const fs   = require('fs');
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-// -----------------------------------------------------
-// 1. ОСНОВНЫЕ MIDDLEWARE
-// -----------------------------------------------------
+// ─── Тестовый режим ───────────────────────────────────────────────────────────
+// true  — отключает проверку подписи Telegram, telegramId = 12345 (для отладки из браузера)
+// false — включает строгую валидацию Telegram initData (для продакшена)
+const TEST_MODE = process.env.TEST_MODE === 'true' || false;
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(bodyParser.json());
-
-// Раздача статических файлов Mini App (из папки public)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// -----------------------------------------------------
-// 2. БАЗА ДАННЫХ
-// -----------------------------------------------------
-const client = new Client({ connectionString: process.env.DATABASE_URL });
+// ─── База данных ──────────────────────────────────────────────────────────────
+const db = new Client({ connectionString: process.env.DATABASE_URL });
 
-// Функция создания таблиц (выполняется один раз при старте)
 async function initDB() {
-  try {
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        telegram_id BIGINT UNIQUE NOT NULL,
-        phone VARCHAR(20),
-        name VARCHAR(255),
-        username VARCHAR(255),
-        api_key_wb VARCHAR(255),
-        wb_token TEXT,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id          SERIAL PRIMARY KEY,
+      telegram_id BIGINT UNIQUE NOT NULL,
+      phone       VARCHAR(20),
+      name        VARCHAR(255),
+      username    VARCHAR(255),
+      wb_token    TEXT,
+      wb_token_info JSONB,
+      created_at  TIMESTAMP DEFAULT NOW(),
+      updated_at  TIMESTAMP DEFAULT NOW()
+    );
 
-      CREATE TABLE IF NOT EXISTS sms_requests (
-        telegram_id BIGINT PRIMARY KEY,
-        phone VARCHAR(20),
-        request_id VARCHAR(255),
-        created_at TIMESTAMP DEFAULT NOW()
-      );
+    CREATE TABLE IF NOT EXISTS transfer_requests (
+      id             SERIAL PRIMARY KEY,
+      user_id        BIGINT NOT NULL,
+      from_warehouse VARCHAR(255) NOT NULL,
+      to_warehouse   VARCHAR(255) NOT NULL,
+      sku            VARCHAR(100) NOT NULL,
+      amount         INTEGER NOT NULL CHECK (amount > 0),
+      status         VARCHAR(50) DEFAULT 'pending',
+      created_at     TIMESTAMP DEFAULT NOW(),
+      updated_at     TIMESTAMP DEFAULT NOW()
+    );
 
-      CREATE TABLE IF NOT EXISTS transfer_requests (
-        id SERIAL PRIMARY KEY,
-        user_id BIGINT,
-        from_warehouse VARCHAR(255),
-        to_warehouse VARCHAR(255),
-        sku VARCHAR(50),
-        amount INTEGER,
-        status VARCHAR(50) DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS payments (
-        id SERIAL PRIMARY KEY,
-        user_id BIGINT,
-        amount NUMERIC(10, 2),
-        status VARCHAR(50),
-        yookassa_id VARCHAR(255) UNIQUE,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log('✅ Таблицы проверены/созданы');
-  } catch (err) {
-    console.error('❌ Ошибка создания таблиц:', err);
-  }
+    CREATE TABLE IF NOT EXISTS payments (
+      id           SERIAL PRIMARY KEY,
+      user_id      BIGINT NOT NULL,
+      amount       NUMERIC(10, 2),
+      units        INTEGER,
+      status       VARCHAR(50),
+      yookassa_id  VARCHAR(255) UNIQUE,
+      created_at   TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  console.log('✅ Таблицы БД проверены/созданы');
 }
 
-// Подключаемся к БД и сразу создаём таблицы
-client.connect()
-  .then(() => {
-    console.log('✅ Подключено к PostgreSQL');
-    return initDB();
-  })
-  .catch(err => console.error('❌ Ошибка подключения к БД:', err));
+db.connect()
+  .then(() => { console.log('✅ PostgreSQL подключён'); return initDB(); })
+  .catch(err => { console.error('❌ Ошибка подключения к БД:', err); process.exit(1); });
 
-// -----------------------------------------------------
-// 3. ТЕСТОВЫЙ РЕЖИМ (отключает проверку Telegram)
-// -----------------------------------------------------
-const TEST_MODE = true; // Поставьте false, когда Mini App заработает через WebView
-
-// -----------------------------------------------------
-// 4. MIDDLEWARE АВТОРИЗАЦИИ TELEGRAM
-// -----------------------------------------------------
+// ─── Telegram Auth Middleware ─────────────────────────────────────────────────
 async function telegramAuth(req, res, next) {
-  // В тестовом режиме пропускаем всех, используя фиктивный telegramId
   if (TEST_MODE) {
     req.telegramId = 12345;
+    req.telegramUser = { id: 12345, first_name: 'Test', username: 'testuser' };
     return next();
   }
 
   const authHeader = req.headers.authorization || '';
   const [authType, authData] = authHeader.split(' ');
 
-  if (authType !== 'tma') {
-    return res.status(401).json({ error: 'Требуется авторизация через Telegram' });
+  if (authType !== 'tma' || !authData) {
+    return res.status(401).json({ error: 'Требуется авторизация через Telegram Mini App' });
   }
 
   try {
     validate(authData, BOT_TOKEN, { expiresIn: 86400 });
     const initData = new URLSearchParams(authData);
-    const user = JSON.parse(initData.get('user'));
-    if (!user || !user.id) {
-      return res.status(400).json({ error: 'Нет данных пользователя' });
-    }
-    req.telegramId = user.id;
+    const user = JSON.parse(initData.get('user') || 'null');
+    if (!user?.id) return res.status(400).json({ error: 'Нет данных пользователя Telegram' });
+
+    req.telegramId   = user.id;
+    req.telegramUser = user;
     next();
   } catch (error) {
-    console.error('Ошибка валидации Telegram:', error);
+    console.error('Ошибка валидации Telegram initData:', error.message);
     return res.status(403).json({ error: 'Недействительные данные Telegram' });
   }
 }
 
-// -----------------------------------------------------
-// 5. МАРШРУТЫ АВТОРИЗАЦИИ (SMS)
-// -----------------------------------------------------
+// ─── Вспомогательная функция: получить wb_token пользователя ─────────────────
+async function getUserToken(telegramId) {
+  const result = await db.query(
+    'SELECT wb_token FROM users WHERE telegram_id = $1',
+    [telegramId]
+  );
+  return result.rows[0]?.wb_token || null;
+}
 
-// Запросить код
-app.post('/auth/request-sms', telegramAuth, async (req, res) => {
-  const { phone } = req.body;
-  if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTH ROUTES — авторизация по API-токену WB
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /auth/set-token
+ * Принимает API-токен WB, проверяет его валидность реальным запросом к WB API,
+ * затем сохраняет в БД. Токен генерируется продавцом в ЛК:
+ * Профиль → Настройки → Доступ к API → Создать токен (категория: Marketplace)
+ */
+app.post('/auth/set-token', telegramAuth, async (req, res) => {
+  const { token } = req.body;
+  if (!token || token.trim().length < 10) {
+    return res.status(400).json({ error: 'Введите API-токен Wildberries' });
+  }
+
+  const cleanToken = token.trim();
+
+  // Проверяем токен реальным запросом к WB API
+  const validation = await validateWbToken(cleanToken);
+  if (!validation.success) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  // Декодируем JWT для сохранения мета-информации (срок действия, категории)
+  const tokenInfo = decodeWbToken(cleanToken);
 
   try {
-    // Проверим, возможно пользователь уже авторизован
-    const existing = await client.query(
-      'SELECT wb_token FROM users WHERE telegram_id = $1',
-      [req.telegramId]
+    await db.query(
+      `INSERT INTO users (telegram_id, wb_token, wb_token_info, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (telegram_id)
+       DO UPDATE SET wb_token = $2, wb_token_info = $3, updated_at = NOW()`,
+      [req.telegramId, cleanToken, tokenInfo ? JSON.stringify(tokenInfo) : null]
     );
-    if (existing.rows.length > 0 && existing.rows[0].wb_token) {
-      return res.json({
-        success: false,
-        already_authorized: true,
-        message: 'Вы уже авторизованы в Wildberries'
-      });
-    }
 
-    const result = await requestSmsCode(phone);
-    if (result.success) {
-      await client.query(
-        `INSERT INTO sms_requests (telegram_id, phone, request_id, created_at)
-         VALUES ($1, $2, $3, NOW())
-         ON CONFLICT (telegram_id) DO UPDATE SET phone = $2, request_id = $3, created_at = NOW()`,
-        [req.telegramId, phone, result.requestId]
-      );
-      res.json({ success: true, message: 'Код отправлен на номер ' + phone });
-    } else {
-      res.status(400).json({ success: false, error: result.error || 'Не удалось отправить SMS' });
-    }
+    const expiresAt = tokenInfo?.exp
+      ? new Date(tokenInfo.exp * 1000).toLocaleDateString('ru-RU')
+      : null;
+
+    res.json({
+      success: true,
+      message: 'API-токен сохранён и проверен',
+      expires_at: expiresAt
+    });
   } catch (err) {
-    console.error('Ошибка в /auth/request-sms:', err);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    console.error('Ошибка сохранения токена в БД:', err);
+    res.status(500).json({ error: 'Ошибка сохранения токена' });
   }
 });
 
-// Подтвердить код
-app.post('/auth/verify-sms', telegramAuth, async (req, res) => {
-  const { code } = req.body;
-  if (!code) return res.status(400).json({ error: 'Введите код' });
-
-  try {
-    const smsReq = await client.query(
-      'SELECT phone, request_id FROM sms_requests WHERE telegram_id = $1',
-      [req.telegramId]
-    );
-    if (smsReq.rows.length === 0) {
-      return res.status(400).json({ error: 'Сначала запросите код' });
-    }
-
-    const { phone, request_id } = smsReq.rows[0];
-    const result = await confirmSmsCode(phone, code, request_id);
-
-    if (result.success) {
-      // Сохраняем токен WB в users
-      await client.query(
-        `INSERT INTO users (telegram_id, phone, wb_token, updated_at)
-         VALUES ($1, $2, $3, NOW())
-         ON CONFLICT (telegram_id) DO UPDATE SET phone = $2, wb_token = $3, updated_at = NOW()`,
-        [req.telegramId, phone, result.token]
-      );
-      // Удаляем временную запись SMS
-      await client.query('DELETE FROM sms_requests WHERE telegram_id = $1', [req.telegramId]);
-      res.json({ success: true, message: 'Авторизация в Wildberries успешна' });
-    } else {
-      res.status(400).json({ success: false, error: result.error || 'Неверный код' });
-    }
-  } catch (err) {
-    console.error('Ошибка в /auth/verify-sms:', err);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-  }
-});
-
-// Статус авторизации
+/**
+ * GET /auth/status
+ * Возвращает статус авторизации и мета-информацию о токене.
+ */
 app.get('/auth/status', telegramAuth, async (req, res) => {
   try {
-    const user = await client.query(
-      'SELECT wb_token FROM users WHERE telegram_id = $1',
+    const result = await db.query(
+      'SELECT wb_token, wb_token_info, updated_at FROM users WHERE telegram_id = $1',
       [req.telegramId]
     );
-    const authorized = user.rows.length > 0 && user.rows[0].wb_token !== null;
-    res.json({ authorized });
+    const row = result.rows[0];
+
+    if (!row?.wb_token) {
+      return res.json({ authorized: false });
+    }
+
+    const tokenInfo = row.wb_token_info;
+    const expiresAt = tokenInfo?.exp
+      ? new Date(tokenInfo.exp * 1000).toLocaleDateString('ru-RU')
+      : null;
+
+    const isExpired = tokenInfo?.exp ? Date.now() / 1000 > tokenInfo.exp : false;
+
+    res.json({
+      authorized: !isExpired,
+      expires_at: expiresAt,
+      is_expired: isExpired,
+      connected_at: row.updated_at
+    });
   } catch (err) {
-    console.error('Ошибка в /auth/status:', err);
+    console.error('Ошибка проверки статуса:', err);
     res.status(500).json({ error: 'Ошибка проверки статуса' });
   }
 });
 
-// -----------------------------------------------------
-// 6. МАРШРУТЫ ДЛЯ РАБОТЫ С WILDBERRIES
-// -----------------------------------------------------
+/**
+ * DELETE /auth/token
+ * Отключить WB-аккаунт (удалить токен).
+ */
+app.delete('/auth/token', telegramAuth, async (req, res) => {
+  try {
+    await db.query(
+      'UPDATE users SET wb_token = NULL, wb_token_info = NULL, updated_at = NOW() WHERE telegram_id = $1',
+      [req.telegramId]
+    );
+    res.json({ success: true, message: 'Токен удалён' });
+  } catch (err) {
+    res.status(500).json({ error: 'Ошибка удаления токена' });
+  }
+});
 
-// Список складов
+// ═══════════════════════════════════════════════════════════════════════════════
+// WB API ROUTES — склады и остатки
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /transfers/warehouses
+ * Список складов продавца.
+ * WB API: GET /api/v3/warehouses
+ */
 app.get('/transfers/warehouses', telegramAuth, async (req, res) => {
   try {
-    const user = await client.query(
-      'SELECT wb_token FROM users WHERE telegram_id = $1',
-      [req.telegramId]
-    );
-    if (!user.rows[0]?.wb_token) {
-      return res.status(401).json({ error: 'Сначала авторизуйтесь в Wildberries через SMS' });
-    }
-    const warehouses = await getWarehouses(user.rows[0].wb_token);
+    const token = await getUserToken(req.telegramId);
+    if (!token) return res.status(401).json({ error: 'Сначала подключите Wildberries API-токен' });
+
+    const warehouses = await getWarehouses(token);
     res.json(warehouses);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Ошибка получения складов' });
+    const status = err.status || 500;
+    res.status(status < 500 ? status : 500).json({
+      error: err.wbDetail || 'Ошибка получения складов'
+    });
   }
 });
 
-// Остатки по складу
-app.get('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
+/**
+ * POST /transfers/stocks/:warehouseId
+ * Остатки товаров на конкретном складе.
+ * WB API: POST /api/v3/stocks/{warehouseId}  body: { skus: [...] }
+ *
+ * Если skus не переданы — автоматически получает все баркоды из карточек (требует токен с Content).
+ */
+app.post('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
   const { warehouseId } = req.params;
-  const { skus } = req.query;
-  if (!skus) return res.status(400).json({ error: 'Укажите список SKU' });
-  const skuArray = skus.split(',');
+  let { skus } = req.body;
 
   try {
-    const user = await client.query(
-      'SELECT wb_token FROM users WHERE telegram_id = $1',
-      [req.telegramId]
-    );
-    if (!user.rows[0]?.wb_token) {
-      return res.status(401).json({ error: 'Сначала авторизуйтесь в Wildberries через SMS' });
+    const token = await getUserToken(req.telegramId);
+    if (!token) return res.status(401).json({ error: 'Сначала подключите Wildberries API-токен' });
+
+    // Если SKU не переданы — пробуем получить из карточек товаров
+    if (!skus || skus.length === 0) {
+      try {
+        const cards = await getAllCards(token);
+        skus = extractSkusFromCards(cards);
+      } catch {
+        return res.status(400).json({ error: 'Укажите список SKU или выдайте токену права на категорию Content' });
+      }
     }
-    const stocks = await getStocks(user.rows[0].wb_token, warehouseId, skuArray);
+
+    if (skus.length === 0) {
+      return res.json({ stocks: [] });
+    }
+
+    const stocks = await getStocks(token, warehouseId, skus);
     res.json(stocks);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Ошибка получения остатков' });
+    const status = err.status || 500;
+    res.status(status < 500 ? status : 500).json({
+      error: err.wbDetail || 'Ошибка получения остатков'
+    });
   }
 });
 
-// Создать запрос на перемещение
-app.post('/transfers/create', telegramAuth, async (req, res) => {
-  const { from_warehouse, to_warehouse, sku, amount } = req.body;
-  if (!from_warehouse || !to_warehouse || !sku || !amount) {
-    return res.status(400).json({ error: 'Заполните все поля' });
+/**
+ * GET /transfers/stocks/:warehouseId  (совместимость со старым фронтендом)
+ * skus передаются через query-параметр: ?skus=sku1,sku2
+ */
+app.get('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
+  const { warehouseId } = req.params;
+  const skusParam = req.query.skus;
+  const skus = skusParam ? skusParam.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  try {
+    const token = await getUserToken(req.telegramId);
+    if (!token) return res.status(401).json({ error: 'Сначала подключите Wildberries API-токен' });
+    if (skus.length === 0) return res.status(400).json({ error: 'Укажите список SKU (?skus=sku1,sku2)' });
+
+    const stocks = await getStocks(token, warehouseId, skus);
+    res.json(stocks);
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status < 500 ? status : 500).json({
+      error: err.wbDetail || 'Ошибка получения остатков'
+    });
+  }
+});
+
+/**
+ * PUT /transfers/stocks/:warehouseId
+ * Обновить остатки на складе.
+ * WB API: PUT /api/v3/stocks/{warehouseId}  body: { stocks: [{ sku, amount }] }
+ */
+app.put('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
+  const { warehouseId } = req.params;
+  const { stocks } = req.body;
+
+  if (!Array.isArray(stocks) || stocks.length === 0) {
+    return res.status(400).json({ error: 'Передайте массив stocks: [{ sku, amount }]' });
   }
 
   try {
-    const result = await client.query(
+    const token = await getUserToken(req.telegramId);
+    if (!token) return res.status(401).json({ error: 'Сначала подключите Wildberries API-токен' });
+
+    await updateStocks(token, warehouseId, stocks);
+    res.json({ success: true });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status < 500 ? status : 500).json({
+      error: err.wbDetail || 'Ошибка обновления остатков'
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRANSFER REQUESTS — запросы на перемещение (локальная БД)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /transfers/create
+ * Создать запрос на перемещение товара между складами.
+ */
+app.post('/transfers/create', telegramAuth, async (req, res) => {
+  const { from_warehouse, to_warehouse, sku, amount } = req.body;
+
+  if (!from_warehouse || !to_warehouse || !sku || !amount) {
+    return res.status(400).json({ error: 'Заполните все поля: from_warehouse, to_warehouse, sku, amount' });
+  }
+  if (parseInt(amount, 10) <= 0) {
+    return res.status(400).json({ error: 'Количество должно быть больше 0' });
+  }
+  if (from_warehouse === to_warehouse) {
+    return res.status(400).json({ error: 'Склады отправителя и получателя должны отличаться' });
+  }
+
+  try {
+    const result = await db.query(
       `INSERT INTO transfer_requests (user_id, from_warehouse, to_warehouse, sku, amount, status)
        VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING *`,
-      [req.telegramId, from_warehouse, to_warehouse, sku, amount]
+      [req.telegramId, from_warehouse, to_warehouse, sku, parseInt(amount, 10)]
     );
     res.json({ success: true, request: result.rows[0] });
   } catch (err) {
-    console.error(err);
+    console.error('Ошибка создания запроса:', err);
     res.status(500).json({ error: 'Ошибка создания запроса' });
   }
 });
 
-// Список запросов
+/**
+ * GET /transfers/list
+ * Список запросов на перемещение текущего пользователя.
+ */
 app.get('/transfers/list', telegramAuth, async (req, res) => {
   try {
-    const result = await client.query(
+    const result = await db.query(
       'SELECT * FROM transfer_requests WHERE user_id = $1 ORDER BY created_at DESC',
       [req.telegramId]
     );
@@ -294,59 +378,79 @@ app.get('/transfers/list', telegramAuth, async (req, res) => {
   }
 });
 
-// Удаление запроса (добавил по вашей просьбе)
+/**
+ * DELETE /transfers/:id
+ * Удалить запрос на перемещение (только свой, только в статусе pending).
+ */
 app.delete('/transfers/:id', telegramAuth, async (req, res) => {
   const { id } = req.params;
+  if (!Number.isInteger(Number(id))) {
+    return res.status(400).json({ error: 'Некорректный ID' });
+  }
+
   try {
-    const result = await client.query(
-      'DELETE FROM transfer_requests WHERE id = $1 AND user_id = $2',
+    const result = await db.query(
+      `DELETE FROM transfer_requests
+       WHERE id = $1 AND user_id = $2
+       RETURNING id`,
       [id, req.telegramId]
     );
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Запрос не найден' });
+      return res.status(404).json({ error: 'Запрос не найден или уже удалён' });
     }
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Ошибка удаления' });
   }
 });
 
-// -----------------------------------------------------
-// 7. ПЛАТЕЖИ (заглушка)
-// -----------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAYMENTS — заглушка (планируется ЮKassa)
+// ═══════════════════════════════════════════════════════════════════════════════
+
 app.post('/payments/create', telegramAuth, (req, res) => {
-  res.status(503).json({ error: 'Платёжный сервис временно недоступен' });
+  // TODO: интеграция с yookassa-sdk
+  res.status(503).json({
+    error: 'Платёжный сервис временно недоступен. Планируется интеграция с ЮKassa.'
+  });
 });
 
 app.get('/payments/history', telegramAuth, async (req, res) => {
   try {
-    const result = await client.query(
+    const result = await db.query(
       'SELECT * FROM payments WHERE user_id = $1 ORDER BY created_at DESC',
       [req.telegramId]
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: 'Ошибка загрузки истории' });
+    res.status(500).json({ error: 'Ошибка загрузки истории платежей' });
   }
 });
 
-// -----------------------------------------------------
-// 8. ДИАГНОСТИЧЕСКИЙ МАРШРУТ (опционально)
-// -----------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════════
+// СЛУЖЕБНЫЕ МАРШРУТЫ
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    test_mode: TEST_MODE,
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/check-files', (req, res) => {
-  const rootFiles = fs.readdirSync(__dirname);
-  let publicFiles = 'папка public не найдена';
-  const publicPath = path.join(__dirname, 'public');
-  if (fs.existsSync(publicPath)) {
-    publicFiles = fs.readdirSync(publicPath).join(', ');
-  }
-  res.json({ rootFiles, publicFiles });
+  const rootFiles   = fs.readdirSync(__dirname);
+  const publicPath  = path.join(__dirname, 'public');
+  const publicFiles = fs.existsSync(publicPath)
+    ? fs.readdirSync(publicPath).join(', ')
+    : 'папка public не найдена';
+  res.json({ rootFiles, publicFiles, test_mode: TEST_MODE });
 });
 
-// -----------------------------------------------------
-// 9. ЗАПУСК СЕРВЕРА
-// -----------------------------------------------------
+// ─── Запуск ───────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
+  console.log(`🔧 Тестовый режим: ${TEST_MODE ? 'ВКЛ (telegramId=12345)' : 'ВЫКЛ (проверка Telegram)'}`);
+  console.log(`📦 Статика: ${path.join(__dirname, 'public')}`);
 });
