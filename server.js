@@ -7,7 +7,8 @@ const express    = require('express');
 const cors       = require('cors');
 const bodyParser = require('body-parser');
 const { Client } = require('pg');
-const { validate } = require('@telegram-apps/init-data-node');
+const crypto = require('crypto');
+// @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken } = require('./wb-auth');
 const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards } = require('./wb-api');
 const path = require('path');
@@ -97,6 +98,39 @@ function requireDB(req, res, next) {
 connectDB();
 
 // ─── Telegram Auth Middleware ─────────────────────────────────────────────────
+// Валидация Telegram Mini App initData по официальному алгоритму:
+// https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+function validateTelegramInitData(initData, botToken) {
+  const params = new URLSearchParams(initData);
+  const receivedHash = params.get('hash');
+  if (!receivedHash) throw new Error('hash отсутствует в initData');
+
+  // Удаляем hash из параметров перед проверкой
+  params.delete('hash');
+
+  // Сортируем параметры и формируем строку проверки
+  const checkString = Array.from(params.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n');
+
+  // Секретный ключ: HMAC-SHA256 от токена бота с ключом "WebAppData"
+  const secretKey = crypto
+    .createHmac('sha256', 'WebAppData')
+    .update(botToken.trim())
+    .digest();
+
+  // Ожидаемый хэш
+  const expectedHash = crypto
+    .createHmac('sha256', secretKey)
+    .update(checkString)
+    .digest('hex');
+
+  if (expectedHash !== receivedHash) {
+    throw new Error('Hash is invalid');
+  }
+}
+
 async function telegramAuth(req, res, next) {
   if (TEST_MODE) {
     req.telegramId = 12345;
@@ -106,7 +140,6 @@ async function telegramAuth(req, res, next) {
 
   const authHeader = req.headers.authorization || '';
 
-  // indexOf вместо split(' ') — initData может содержать пробелы
   const spaceIdx = authHeader.indexOf(' ');
   if (spaceIdx === -1) {
     return res.status(401).json({ error: 'Требуется авторизация через Telegram Mini App' });
@@ -119,12 +152,15 @@ async function telegramAuth(req, res, next) {
     return res.status(401).json({ error: 'Требуется авторизация через Telegram Mini App' });
   }
 
-  console.log('[TG Auth] initData length:', authData.length, '| BOT_TOKEN set:', !!BOT_TOKEN);
+  if (!BOT_TOKEN) {
+    console.error('[TG Auth] TELEGRAM_BOT_TOKEN не задан!');
+    return res.status(500).json({ error: 'Ошибка конфигурации сервера' });
+  }
+
+  console.log('[TG Auth] initData length:', authData.length, '| token ok:', !!BOT_TOKEN);
 
   try {
-    // expiresIn: 0 — отключает проверку срока; Telegram иногда передаёт
-    // устаревший auth_date при повторном открытии Mini App без перезагрузки
-    validate(authData, BOT_TOKEN, { expiresIn: 0 });
+    validateTelegramInitData(authData, BOT_TOKEN);
 
     const params  = new URLSearchParams(authData);
     const userRaw = params.get('user');
@@ -139,14 +175,13 @@ async function telegramAuth(req, res, next) {
       return res.status(400).json({ error: 'Нет данных пользователя Telegram' });
     }
 
-    console.log('[TG Auth] OK userId:', user.id, 'username:', user.username || user.first_name);
+    console.log('[TG Auth] ✅ userId:', user.id, '|', user.username || user.first_name);
     req.telegramId   = user.id;
     req.telegramUser = user;
     next();
   } catch (error) {
-    console.error('[TG Auth] validate() failed:', error.message);
-    console.error('[TG Auth] BOT_TOKEN length:', BOT_TOKEN ? BOT_TOKEN.length : 'NOT SET');
-    console.error('[TG Auth] initData snippet:', authData.substring(0, 80));
+    console.error('[TG Auth] ❌', error.message);
+    console.error('[TG Auth] initData snippet:', authData.substring(0, 120));
     return res.status(403).json({ error: 'Недействительные данные Telegram: ' + error.message });
   }
 }
