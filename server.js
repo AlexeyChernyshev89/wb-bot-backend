@@ -105,24 +105,49 @@ async function telegramAuth(req, res, next) {
   }
 
   const authHeader = req.headers.authorization || '';
-  const [authType, authData] = authHeader.split(' ');
+
+  // indexOf вместо split(' ') — initData может содержать пробелы
+  const spaceIdx = authHeader.indexOf(' ');
+  if (spaceIdx === -1) {
+    return res.status(401).json({ error: 'Требуется авторизация через Telegram Mini App' });
+  }
+
+  const authType = authHeader.substring(0, spaceIdx);
+  const authData = authHeader.substring(spaceIdx + 1);
 
   if (authType !== 'tma' || !authData) {
     return res.status(401).json({ error: 'Требуется авторизация через Telegram Mini App' });
   }
 
-  try {
-    validate(authData, BOT_TOKEN, { expiresIn: 86400 });
-    const initData = new URLSearchParams(authData);
-    const user = JSON.parse(initData.get('user') || 'null');
-    if (!user?.id) return res.status(400).json({ error: 'Нет данных пользователя Telegram' });
+  console.log('[TG Auth] initData length:', authData.length, '| BOT_TOKEN set:', !!BOT_TOKEN);
 
+  try {
+    // expiresIn: 0 — отключает проверку срока; Telegram иногда передаёт
+    // устаревший auth_date при повторном открытии Mini App без перезагрузки
+    validate(authData, BOT_TOKEN, { expiresIn: 0 });
+
+    const params  = new URLSearchParams(authData);
+    const userRaw = params.get('user');
+    if (!userRaw) {
+      console.error('[TG Auth] Поле user отсутствует в initData');
+      return res.status(400).json({ error: 'Нет данных пользователя Telegram' });
+    }
+
+    const user = JSON.parse(userRaw);
+    if (!user?.id) {
+      console.error('[TG Auth] user.id отсутствует:', user);
+      return res.status(400).json({ error: 'Нет данных пользователя Telegram' });
+    }
+
+    console.log('[TG Auth] OK userId:', user.id, 'username:', user.username || user.first_name);
     req.telegramId   = user.id;
     req.telegramUser = user;
     next();
   } catch (error) {
-    console.error('Ошибка валидации Telegram initData:', error.message);
-    return res.status(403).json({ error: 'Недействительные данные Telegram' });
+    console.error('[TG Auth] validate() failed:', error.message);
+    console.error('[TG Auth] BOT_TOKEN length:', BOT_TOKEN ? BOT_TOKEN.length : 'NOT SET');
+    console.error('[TG Auth] initData snippet:', authData.substring(0, 80));
+    return res.status(403).json({ error: 'Недействительные данные Telegram: ' + error.message });
   }
 }
 
