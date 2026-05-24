@@ -384,13 +384,19 @@
 // ───────────────────────────────────────────────────────
 // TELEGRAM MINI APP
 // ───────────────────────────────────────────────────────
-const tg = window.Telegram?.WebApp ?? { initData: 'test_init_data', ready: () => {}, expand: () => {} };
-tg.ready();
-tg.expand?.();
+const tg = window.Telegram?.WebApp;
+
+// initData присутствует только когда открыто как Mini App
+const initData = tg?.initData || '';
+const isRealTelegramApp = initData.includes('hash=');
+
+if (tg) { tg.ready(); tg.expand?.(); }
+
+console.log('[WB App] WebApp:', !!tg, '| initData len:', initData.length, '| has hash:', isRealTelegramApp);
 
 const AUTH_HEADERS = {
   'Content-Type': 'application/json',
-  'Authorization': 'tma ' + tg.initData
+  'Authorization': 'tma ' + initData
 };
 
 async function api(method, url, body) {
@@ -408,10 +414,44 @@ async function api(method, url, body) {
 // ИНИЦИАЛИЗАЦИЯ
 // ───────────────────────────────────────────────────────
 async function init() {
+  // Если не настоящий Telegram Mini App — показываем инструкцию
+  if (!isRealTelegramApp) {
+    showTelegramError();
+    return;
+  }
   try {
     const st = await api('GET', '/auth/status');
     st.authorized ? showMain(st) : showAuth();
-  } catch { showAuth(); }
+  } catch (e) {
+    showAuth();
+  }
+}
+
+function showTelegramError() {
+  document.body.innerHTML = `
+    <div style="padding:24px;font-family:-apple-system,sans-serif;max-width:400px;margin:0 auto">
+      <div style="font-size:48px;text-align:center;margin-bottom:16px">⚠️</div>
+      <h2 style="font-size:20px;font-weight:700;margin-bottom:12px;text-align:center">
+        Откройте через Telegram
+      </h2>
+      <p style="font-size:14px;color:#666;line-height:1.6;margin-bottom:20px;text-align:center">
+        Это приложение работает только как Telegram Mini App.<br>
+        Открытие по прямой ссылке в браузере не поддерживается.
+      </p>
+      <div style="background:#f5f5f5;border-radius:12px;padding:16px;font-size:13px;color:#444;line-height:1.8">
+        <b>Как открыть:</b><br>
+        1. Найдите бота в Telegram<br>
+        2. Нажмите кнопку меню (🔘) внизу<br>
+        &nbsp;&nbsp;&nbsp;или используйте команду /start<br>
+        3. Нажмите кнопку <b>«Открыть приложение»</b>
+      </div>
+      <div style="margin-top:16px;padding:12px;background:#fff3cd;border-radius:10px;font-size:12px;color:#856404">
+        <b>Debug info:</b><br>
+        Telegram.WebApp: ${!!tg}<br>
+        initData length: ${initData.length}<br>
+        has hash: ${isRealTelegramApp}
+      </div>
+    </div>`;
 }
 
 function showAuth() {

@@ -514,6 +514,29 @@ app.get('/payments/history', telegramAuth, requireDB, async (req, res) => {
 // СЛУЖЕБНЫЕ МАРШРУТЫ
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
+// ─── DEBUG: диагностика initData (убрать после отладки) ──────────────────────
+app.post('/debug-auth', (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const spaceIdx   = authHeader.indexOf(' ');
+  const authData   = spaceIdx !== -1 ? authHeader.substring(spaceIdx + 1) : '';
+  const params     = {};
+  try {
+    new URLSearchParams(authData).forEach((v, k) => {
+      params[k] = k === 'hash' ? v : v.substring(0, 80);
+    });
+  } catch {}
+  res.json({
+    header_length:   authHeader.length,
+    authdata_length: authData.length,
+    has_hash:        authData.includes('hash='),
+    params_found:    Object.keys(params),
+    raw_snippet:     authData.substring(0, 100),
+    bot_token_set:   !!BOT_TOKEN,
+    bot_token_len:   BOT_TOKEN ? BOT_TOKEN.length : 0,
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
