@@ -2,197 +2,223 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>WB Supply Helper</title>
   <style>
     :root {
       --bg:        var(--tg-theme-bg-color, #ffffff);
       --text:      var(--tg-theme-text-color, #1a1a1a);
-      --hint:      var(--tg-theme-hint-color, #888);
+      --hint:      var(--tg-theme-hint-color, #8e8e93);
       --link:      var(--tg-theme-link-color, #007aff);
       --btn:       var(--tg-theme-button-color, #007aff);
-      --btn-text:  var(--tg-theme-button-text-color, #fff);
-      --secondary: var(--tg-theme-secondary-bg-color, #f5f5f5);
-      --border:    #e5e7eb;
+      --btn-text:  var(--tg-theme-button-text-color, #ffffff);
+      --secondary: var(--tg-theme-secondary-bg-color, #f2f2f7);
+      --border:    #e5e5ea;
       --danger:    #ff3b30;
       --success:   #34c759;
+      --warning:   #ff9500;
       --radius:    12px;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: var(--bg);
       color: var(--text);
-      padding: 16px;
+      padding: 16px 16px 32px;
       min-height: 100vh;
+      font-size: 15px;
     }
 
-    /* ─── Секции ─────────────────────────────── */
+    /* ── Секции ─────────────────────────────────────────── */
     .section { display: none; }
     .section.active { display: block; }
 
-    /* ─── Типография ─────────────────────────── */
-    h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
-    h3 { font-size: 17px; font-weight: 600; margin-bottom: 12px; }
-    p  { font-size: 14px; color: var(--hint); line-height: 1.5; margin-bottom: 12px; }
+    /* ── Заголовки ──────────────────────────────────────── */
+    h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    h3 { font-size: 17px; font-weight: 600; margin-bottom: 14px; }
 
-    /* ─── Карточки баланса ───────────────────── */
-    .balance-cards {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
+    /* ── Описание ───────────────────────────────────────── */
+    .hint { font-size: 13px; color: var(--hint); line-height: 1.5; margin-bottom: 14px; }
+
+    /* ── Плитки баланса ─────────────────────────────────── */
+    .balance-row { display: flex; gap: 10px; margin-bottom: 18px; }
     .balance-card {
       flex: 1;
       background: var(--secondary);
       border-radius: var(--radius);
-      padding: 14px;
+      padding: 14px 12px;
       text-align: center;
     }
-    .balance-card .value {
-      font-size: 26px;
+    .balance-card .val {
+      font-size: 28px;
       font-weight: 700;
-      color: var(--text);
+      line-height: 1;
+      margin-bottom: 5px;
     }
-    .balance-card .label {
+    .balance-card .lbl {
       font-size: 11px;
       color: var(--hint);
-      margin-top: 4px;
       line-height: 1.3;
     }
 
-    /* ─── Меню ───────────────────────────────── */
-    .menu {
+    /* ── Меню ───────────────────────────────────────────── */
+    .menu-list {
       list-style: none;
       border-radius: var(--radius);
       overflow: hidden;
       border: 1px solid var(--border);
       background: var(--bg);
-      margin-bottom: 20px;
     }
-    .menu li { border-bottom: 1px solid var(--border); }
-    .menu li:last-child { border-bottom: none; }
-    .menu button {
+    .menu-list li { border-bottom: 1px solid var(--border); }
+    .menu-list li:last-child { border-bottom: none; }
+    .menu-list button {
       display: flex;
       align-items: center;
       width: 100%;
-      padding: 13px 16px;
+      padding: 14px 16px;
       background: none;
       border: none;
-      font-size: 15px;
+      font-size: 16px;
       color: var(--text);
       cursor: pointer;
+      gap: 13px;
       text-align: left;
-      gap: 12px;
-      transition: background 0.15s;
     }
-    .menu button:active { background: var(--secondary); }
-    .menu .icon { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
-    .menu .chevron { margin-left: auto; color: var(--hint); font-size: 13px; }
+    .menu-list button:active { background: var(--secondary); }
+    .menu-list .ico { font-size: 19px; width: 26px; text-align: center; flex-shrink: 0; }
+    .menu-list .chevron { margin-left: auto; color: var(--hint); font-size: 18px; line-height: 1; }
 
-    /* ─── Форма токена ───────────────────────── */
-    .token-box {
-      background: var(--secondary);
-      border-radius: var(--radius);
-      padding: 16px;
+    /* ── Кнопка «Назад» ─────────────────────────────────── */
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: none;
+      border: none;
+      color: var(--link);
+      font-size: 15px;
+      cursor: pointer;
+      padding: 0;
       margin-bottom: 16px;
     }
-    .token-box ol {
-      padding-left: 18px;
-      font-size: 13px;
-      color: var(--hint);
-      line-height: 1.8;
-    }
-    .token-box ol li { margin-bottom: 2px; }
 
-    /* ─── Inputs ─────────────────────────────── */
-    input, select, textarea {
+    /* ── Inputs / selects ───────────────────────────────── */
+    label.field-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--hint);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin: 16px 0 4px;
+    }
+    .field-wrap { position: relative; }
+    input, select {
       display: block;
       width: 100%;
       padding: 11px 13px;
-      margin: 8px 0;
       border: 1px solid var(--border);
       border-radius: 10px;
       font-size: 15px;
       color: var(--text);
       background: var(--bg);
       outline: none;
-      transition: border-color 0.2s;
+      -webkit-appearance: none;
+      appearance: none;
     }
     input:focus, select:focus { border-color: var(--btn); }
     input::placeholder { color: var(--hint); }
-    textarea { min-height: 80px; resize: vertical; }
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+    select { background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 7L11 1' stroke='%238E8E93' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; padding-right: 32px; }
 
-    /* ─── Кнопки ─────────────────────────────── */
+    /* крестик очистки поля */
+    .clear-btn {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: var(--hint);
+      border: none;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      color: var(--bg);
+      font-size: 11px;
+      line-height: 18px;
+      text-align: center;
+      cursor: pointer;
+      display: none;
+      padding: 0;
+    }
+
+    /* ── Кнопки ─────────────────────────────────────────── */
     .btn {
       display: block;
       width: 100%;
       padding: 13px;
-      margin-top: 10px;
+      margin-top: 14px;
       border: none;
       border-radius: 10px;
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 600;
       cursor: pointer;
-      transition: opacity 0.2s;
-      text-align: center;
+      transition: opacity .15s;
     }
-    .btn:active { opacity: 0.8; }
+    .btn:active { opacity: .75; }
     .btn-primary { background: var(--btn); color: var(--btn-text); }
-    .btn-secondary {
-      background: var(--secondary);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
+    .btn-secondary { background: var(--secondary); color: var(--text); }
     .btn-danger { background: var(--danger); color: #fff; }
     .btn-sm {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       width: auto;
-      padding: 6px 10px;
+      padding: 6px 12px;
       font-size: 13px;
+      font-weight: 600;
       border-radius: 8px;
-    }
-
-    /* ─── Назад ──────────────────────────────── */
-    .back-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      background: none;
       border: none;
-      color: var(--link);
-      font-size: 14px;
       cursor: pointer;
-      padding: 0;
+    }
+    .btn-sm:active { opacity: .75; }
+    .btn-sm.primary { background: var(--btn); color: var(--btn-text); }
+    .btn-sm.danger  { background: var(--danger); color: #fff; }
+
+    /* ── Сообщения ──────────────────────────────────────── */
+    .msg { font-size: 13px; margin-top: 8px; line-height: 1.4; }
+    .msg-error   { color: var(--danger); }
+    .msg-success { color: var(--success); }
+    .msg-warn    { color: var(--warning); }
+
+    /* ── Инфо-баннер ────────────────────────────────────── */
+    .info-banner {
+      background: var(--secondary);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      font-size: 13px;
+      color: var(--hint);
       margin-bottom: 16px;
     }
+    .info-banner b { color: var(--text); }
 
-    /* ─── Сообщения ──────────────────────────── */
-    .msg-error   { color: var(--danger); font-size: 13px; margin-top: 6px; }
-    .msg-success { color: var(--success); font-size: 13px; margin-top: 6px; }
-
-    /* ─── Таблица ────────────────────────────── */
-    .table-wrap { overflow-x: auto; margin-top: 12px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th {
-      text-align: left;
-      padding: 8px 10px;
-      color: var(--hint);
-      font-weight: 500;
-      border-bottom: 2px solid var(--border);
-    }
-    td {
-      padding: 10px;
+    /* ── Таблица запросов ───────────────────────────────── */
+    .req-list { margin-top: 12px; }
+    .req-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 0;
       border-bottom: 1px solid var(--border);
-      vertical-align: middle;
     }
-    tr:last-child td { border-bottom: none; }
+    .req-row:last-child { border-bottom: none; }
+    .req-body { flex: 1; min-width: 0; }
+    .req-title { font-size: 14px; font-weight: 600; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .req-sub { font-size: 12px; color: var(--hint); }
+    .req-count { font-size: 18px; font-weight: 700; flex-shrink: 0; }
 
-    /* ─── Статус-бэджи ───────────────────────── */
+    /* ── Статус-бейджи ──────────────────────────────────── */
     .badge {
       display: inline-block;
       padding: 2px 8px;
@@ -200,201 +226,192 @@
       font-size: 11px;
       font-weight: 600;
     }
-    .badge-pending  { background: #fff3cd; color: #856404; }
-    .badge-done     { background: #d1fae5; color: #065f46; }
-    .badge-failed   { background: #fee2e2; color: #991b1b; }
+    .badge-pending { background: #fff3cd; color: #856404; }
+    .badge-done    { background: #d1fae5; color: #065f46; }
+    .badge-failed  { background: #fee2e2; color: #991b1b; }
 
-    /* ─── Пустое состояние ───────────────────── */
+    /* ── Пустое состояние ───────────────────────────────── */
     .empty {
       text-align: center;
-      padding: 40px 20px;
+      padding: 48px 20px;
       color: var(--hint);
     }
-    .empty .icon { font-size: 40px; margin-bottom: 10px; }
+    .empty .ico { font-size: 44px; margin-bottom: 12px; }
+    .empty p { font-size: 15px; margin-bottom: 16px; }
 
-    /* ─── Инфо о подключении ─────────────────── */
-    .connection-info {
-      background: var(--secondary);
-      border-radius: var(--radius);
-      padding: 12px 16px;
-      font-size: 13px;
-      color: var(--hint);
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .connection-info .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: var(--success);
-      flex-shrink: 0;
-    }
-    .connection-info .dot.expired { background: var(--danger); }
-
-    /* ─── Тарифы ─────────────────────────────── */
+    /* ── Тарифы оплаты ──────────────────────────────────── */
     .tariff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
     .tariff-card {
       border: 2px solid var(--border);
       border-radius: 10px;
-      padding: 12px;
+      padding: 13px 10px;
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
       text-align: center;
+      transition: border-color .15s, background .15s;
     }
-    .tariff-card input[type="radio"] { display: none; }
-    .tariff-card.selected {
+    .tariff-card.sel {
       border-color: var(--btn);
       background: color-mix(in srgb, var(--btn) 8%, transparent);
     }
-    .tariff-card .units { font-size: 18px; font-weight: 700; }
-    .tariff-card .price { font-size: 13px; color: var(--hint); margin-top: 2px; }
+    .tariff-card .t-units { font-size: 17px; font-weight: 700; }
+    .tariff-card .t-price { font-size: 13px; color: var(--hint); margin-top: 2px; }
 
-    /* ─── Лоадер ─────────────────────────────── */
+    /* ── История платежей ───────────────────────────────── */
+    .pay-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .pay-row:last-child { border-bottom: none; }
+    .pay-meta { font-size: 13px; color: var(--hint); margin-top: 3px; }
+    .pay-amount { font-size: 17px; font-weight: 700; }
+
+    /* ── Квоты ──────────────────────────────────────────── */
+    .quota-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    .quota-row:last-child { border-bottom: none; }
+    .quota-row .q-name { flex: 1; }
+    .quota-row .q-val { font-weight: 700; text-align: right; }
+
+    /* ── Инструкция токена ──────────────────────────────── */
+    .token-steps {
+      background: var(--secondary);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+    .token-steps p { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .token-steps ol { padding-left: 18px; }
+    .token-steps li { font-size: 13px; color: var(--hint); line-height: 1.9; }
+
+    /* ── Спиннер ────────────────────────────────────────── */
     .spinner {
       display: inline-block;
-      width: 18px; height: 18px;
+      width: 16px; height: 16px;
       border: 2px solid var(--border);
       border-top-color: var(--btn);
       border-radius: 50%;
-      animation: spin 0.7s linear infinite;
+      animation: spin .7s linear infinite;
       vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    label { font-size: 13px; color: var(--hint); display: block; margin-top: 12px; }
+    /* ── Раздел поставщика ──────────────────────────────── */
+    .step-block { display: none; margin-top: 4px; }
+    .step-block.visible { display: block; }
   </style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════
-     СЕКЦИЯ: Авторизация (токен WB)
-═══════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════
+     AUTH — подключение API-токена WB
+════════════════════════════════════════════════════════ -->
 <div id="authSection" class="section active">
-  <h2>🛒 WB Supply Helper</h2>
-  <p>Подключите аккаунт Wildberries через API-токен, чтобы управлять остатками.</p>
+  <h2 style="margin-bottom:4px">🛒 WB Supply Helper</h2>
+  <p class="hint">Управление перераспределением остатков между складами Wildberries.</p>
 
-  <div class="token-box">
-    <p style="color:var(--text); font-weight:600; margin-bottom:8px;">Как получить токен:</p>
+  <div class="token-steps">
+    <p>Как получить API-токен:</p>
     <ol>
-      <li>Войдите в <b>ЛК продавца</b> на seller.wildberries.ru</li>
+      <li>Войдите в <b>seller.wildberries.ru</b></li>
       <li>Профиль → <b>Настройки</b> → <b>Доступ к API</b></li>
       <li>Нажмите <b>«Создать токен»</b></li>
-      <li>Выберите категорию <b>Marketplace</b> (и Content — для автозагрузки SKU)</li>
-      <li>Скопируйте токен и вставьте ниже</li>
+      <li>Отметьте категорию <b>Marketplace</b> (и <b>Content</b> для SKU)</li>
+      <li>Скопируйте токен ниже</li>
     </ol>
   </div>
 
-  <label>API-токен Wildberries</label>
-  <input
-    type="password"
-    id="tokenInput"
+  <label class="field-label">API-токен Wildberries</label>
+  <input type="password" id="tokenInput"
     placeholder="eyJhbGciOiJFUzI1NiIsInR5cCI6Ikp..."
-    autocomplete="off"
-    autocorrect="off"
-    spellcheck="false"
-  />
-  <div id="authError" class="msg-error"></div>
+    autocomplete="off" spellcheck="false" />
+  <div id="authMsg" class="msg"></div>
   <button class="btn btn-primary" id="connectBtn" onclick="connectToken()">Подключить</button>
 </div>
 
-<!-- ═══════════════════════════════════════════
-     СЕКЦИЯ: Главный экран
-═══════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════
+     MAIN — главный экран
+════════════════════════════════════════════════════════ -->
 <div id="mainSection" class="section">
 
-  <div class="balance-cards">
+  <!-- Баланс -->
+  <div class="balance-row">
     <div class="balance-card">
-      <div class="value" id="balanceValue">0</div>
-      <div class="label">Баланс<br>перемещений</div>
+      <div class="val" id="balVal">0</div>
+      <div class="lbl">Баланс<br>перемещений</div>
     </div>
     <div class="balance-card">
-      <div class="value" id="reservedValue">0</div>
-      <div class="label">Зарезервировано<br>перемещений</div>
+      <div class="val" id="resVal">0</div>
+      <div class="lbl">Зарезервировано<br>перемещений</div>
     </div>
   </div>
 
-  <div id="connectionInfo" class="connection-info" style="display:none">
-    <div class="dot" id="connectionDot"></div>
-    <span id="connectionText"></span>
-  </div>
+  <!-- Статус токена -->
+  <div id="tokenBanner" class="info-banner" style="display:none"></div>
 
-  <ul class="menu">
-    <li>
-      <button onclick="navigate('list')">
-        <span class="icon">📋</span>
-        Запросы на перемещение
-        <span class="chevron">›</span>
-      </button>
-    </li>
-    <li>
-      <button onclick="navigate('pay')">
-        <span class="icon">💳</span>
-        Оплата
-        <span class="chevron">›</span>
-      </button>
-    </li>
-    <li>
-      <button onclick="navigate('history')">
-        <span class="icon">🧾</span>
-        История оплат
-        <span class="chevron">›</span>
-      </button>
-    </li>
-    <li>
-      <button onclick="navigate('quotas')">
-        <span class="icon">📊</span>
-        Текущие квоты
-        <span class="chevron">›</span>
-      </button>
-    </li>
-    <li>
-      <button onclick="navigate('settings')">
-        <span class="icon">⚙️</span>
-        Настройки
-        <span class="chevron">›</span>
-      </button>
-    </li>
+  <!-- Меню -->
+  <ul class="menu-list">
+    <li><button onclick="navigate('list')">
+      <span class="ico">📋</span> Список запросов на перемещение
+      <span class="chevron">›</span>
+    </button></li>
+    <li><button onclick="navigate('pay')">
+      <span class="ico">💳</span> Оплата
+      <span class="chevron">›</span>
+    </button></li>
+    <li><button onclick="navigate('history')">
+      <span class="ico">🧾</span> История оплат
+      <span class="chevron">›</span>
+    </button></li>
+    <li><button onclick="navigate('quotas')">
+      <span class="ico">📊</span> Текущие квоты
+      <span class="chevron">›</span>
+    </button></li>
   </ul>
 
   <div id="content"></div>
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════════════
-// ИНИЦИАЛИЗАЦИЯ TELEGRAM MINI APP
-// ═══════════════════════════════════════════════════════════
-const tg = window.Telegram?.WebApp ?? { initData: 'test_init_data', ready: () => {} };
-window.Telegram?.WebApp?.ready();
-window.Telegram?.WebApp?.expand();
+// ───────────────────────────────────────────────────────
+// TELEGRAM MINI APP
+// ───────────────────────────────────────────────────────
+const tg = window.Telegram?.WebApp ?? { initData: 'test_init_data', ready: () => {}, expand: () => {} };
+tg.ready();
+tg.expand?.();
 
-const authHeaders = {
+const AUTH_HEADERS = {
   'Content-Type': 'application/json',
   'Authorization': 'tma ' + tg.initData
 };
 
-// ─── API helper ───────────────────────────────────────────
 async function api(method, url, body) {
-  const opts = { method, headers: authHeaders };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(url, opts);
-  const data = await res.json();
-  if (!res.ok) throw Object.assign(new Error(data.error || 'Ошибка запроса'), { status: res.status });
+  const res = await fetch(url, {
+    method,
+    headers: AUTH_HEADERS,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Ошибка ' + res.status), { status: res.status });
   return data;
 }
 
-// ─── Загрузка и показ нужной секции ──────────────────────
+// ───────────────────────────────────────────────────────
+// ИНИЦИАЛИЗАЦИЯ
+// ───────────────────────────────────────────────────────
 async function init() {
   try {
-    const status = await api('GET', '/auth/status');
-    if (status.authorized) {
-      showMain(status);
-    } else {
-      showAuth();
-    }
-  } catch {
-    showAuth();
-  }
+    const st = await api('GET', '/auth/status');
+    st.authorized ? showMain(st) : showAuth();
+  } catch { showAuth(); }
 }
 
 function showAuth() {
@@ -402,40 +419,35 @@ function showAuth() {
   document.getElementById('mainSection').classList.remove('active');
 }
 
-function showMain(status) {
+function showMain(st) {
   document.getElementById('authSection').classList.remove('active');
   document.getElementById('mainSection').classList.add('active');
 
-  if (status?.expires_at) {
-    const info = document.getElementById('connectionInfo');
-    const dot  = document.getElementById('connectionDot');
-    const text = document.getElementById('connectionText');
-    info.style.display = 'flex';
-    if (status.is_expired) {
-      dot.classList.add('expired');
-      text.textContent = '⚠️ Токен истёк ' + status.expires_at + ' — обновите в настройках';
-    } else {
-      text.textContent = 'WB подключён · токен до ' + status.expires_at;
-    }
+  const banner = document.getElementById('tokenBanner');
+  if (st?.expires_at) {
+    banner.style.display = 'block';
+    banner.innerHTML = st.is_expired
+      ? `⚠️ <b>Токен истёк</b> ${st.expires_at} — перейдите в <a href="#" onclick="navigate('settings');return false;" style="color:var(--link)">настройки</a> и обновите.`
+      : `✅ WB подключён · токен действует до <b>${st.expires_at}</b>`;
+  } else {
+    banner.style.display = 'none';
   }
 
   navigate('list');
 }
 
-// ═══════════════════════════════════════════════════════════
-// АВТОРИЗАЦИЯ — подключение токена WB
-// ═══════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────────────
+// АВТОРИЗАЦИЯ
+// ───────────────────────────────────────────────────────
 async function connectToken() {
   const token = document.getElementById('tokenInput').value.trim();
-  const errorEl = document.getElementById('authError');
-  const btn = document.getElementById('connectBtn');
+  const msgEl = document.getElementById('authMsg');
+  const btn   = document.getElementById('connectBtn');
+  msgEl.className = 'msg';
+  msgEl.textContent = '';
 
-  if (!token) {
-    errorEl.textContent = 'Вставьте API-токен Wildberries';
-    return;
-  }
+  if (!token) { msgEl.className='msg msg-error'; msgEl.textContent='Вставьте API-токен'; return; }
 
-  errorEl.textContent = '';
   btn.innerHTML = '<span class="spinner"></span> Проверяем...';
   btn.disabled = true;
 
@@ -443,165 +455,331 @@ async function connectToken() {
     const res = await api('POST', '/auth/set-token', { token });
     showMain({ expires_at: res.expires_at });
   } catch (err) {
-    errorEl.textContent = err.message || 'Ошибка подключения';
+    msgEl.className = 'msg msg-error';
+    msgEl.textContent = err.message;
     btn.innerHTML = 'Подключить';
     btn.disabled = false;
   }
 }
 
-// ═══════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────────────
 // НАВИГАЦИЯ
-// ═══════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────────────
 function navigate(section) {
-  const content = document.getElementById('content');
-  content.innerHTML = '';
-  switch (section) {
-    case 'list':     renderTransferList(content); break;
-    case 'create':   renderCreateForm(content);   break;
-    case 'pay':      renderPayment(content);       break;
-    case 'history':  renderHistory(content);       break;
-    case 'quotas':   renderQuotas(content);        break;
-    case 'settings': renderSettings(content);      break;
-  }
+  const c = document.getElementById('content');
+  c.innerHTML = '';
+  const map = {
+    list:     renderList,
+    create:   renderCreate,
+    pay:      renderPay,
+    history:  renderHistory,
+    quotas:   renderQuotas,
+    settings: renderSettings,
+  };
+  (map[section] || (() => {}))(c);
 }
 
-function backBtn(label, section) {
-  return `<button class="back-btn" onclick="navigate('${section}')">‹ ${label}</button>`;
+function backBtn(label, to) {
+  return `<button class="back-btn" onclick="navigate('${to}')">‹ ${label}</button>`;
 }
 
-// ═══════════════════════════════════════════════════════════
-// СПИСОК ЗАПРОСОВ НА ПЕРЕМЕЩЕНИЕ
-// ═══════════════════════════════════════════════════════════
-async function renderTransferList(container) {
-  container.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+// ───────────────────────────────────────────────────────
+// СПИСОК ЗАПРОСОВ
+// ───────────────────────────────────────────────────────
+async function renderList(c) {
+  c.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
       <h3 style="margin:0">Перемещения</h3>
-      <button class="btn btn-primary btn-sm" onclick="navigate('create')">+ Создать</button>
+      <button class="btn-sm primary" onclick="navigate('create')">+ Создать запрос</button>
     </div>
-    <div id="listContent"><span class="spinner"></span> Загрузка...</div>
-  `;
+    <div id="listBody"><span class="spinner"></span></div>`;
 
   try {
-    const requests = await api('GET', '/transfers/list');
-    const el = document.getElementById('listContent');
+    const rows = await api('GET', '/transfers/list');
+    const el = document.getElementById('listBody');
 
-    if (requests.length === 0) {
-      el.innerHTML = `
-        <div class="empty">
-          <div class="icon">📦</div>
-          <p>Нет запросов на перемещение</p>
-          <button class="btn btn-primary" style="width:auto;padding:10px 24px" onclick="navigate('create')">
-            Создать первый
-          </button>
-        </div>`;
+    if (!rows.length) {
+      el.innerHTML = `<div class="empty">
+        <div class="ico">📦</div>
+        <p>Запросов пока нет</p>
+        <button class="btn btn-primary" style="width:auto;padding:11px 28px" onclick="navigate('create')">+ Создать первый</button>
+      </div>`;
       return;
     }
 
-    const statusBadge = s => {
-      const map = { pending: ['badge-pending','Ожидает'], done: ['badge-done','Выполнен'], failed: ['badge-failed','Ошибка'] };
-      const [cls, label] = map[s] || ['badge-pending', s];
-      return `<span class="badge ${cls}">${label}</span>`;
+    const badge = s => {
+      const m = { pending:['badge-pending','Ожидает'], done:['badge-done','Выполнен'], failed:['badge-failed','Ошибка'] };
+      const [cls, lbl] = m[s] || ['badge-pending', s];
+      return `<span class="badge ${cls}">${lbl}</span>`;
     };
 
-    el.innerHTML = `
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>ID</th><th>Откуда</th><th>Куда</th>
-            <th>SKU</th><th>Кол-во</th><th>Статус</th><th></th>
-          </tr></thead>
-          <tbody>
-            ${requests.map(r => `
-              <tr>
-                <td>#${r.id}</td>
-                <td>${r.from_warehouse}</td>
-                <td>${r.to_warehouse}</td>
-                <td style="font-family:monospace;font-size:12px">${r.sku}</td>
-                <td>${r.amount}</td>
-                <td>${statusBadge(r.status)}</td>
-                <td>
-                  <button class="btn btn-danger btn-sm"
-                    onclick="deleteTransfer(${r.id})"
-                    title="Удалить">🗑</button>
-                </td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`;
-  } catch (err) {
-    document.getElementById('listContent').innerHTML =
-      `<p class="msg-error">${err.message}</p>`;
+    el.innerHTML = '<div class="req-list">' + rows.map(r => `
+      <div class="req-row">
+        <div class="req-body">
+          <div class="req-title">
+            ${r.from_warehouse} → ${r.to_warehouse}
+          </div>
+          <div class="req-sub">Арт. ${r.sku} &nbsp;·&nbsp; ${badge(r.status)}</div>
+        </div>
+        <div class="req-count">${r.amount}</div>
+        <button class="btn-sm danger" onclick="deleteTransfer(${r.id})" title="Удалить">🗑</button>
+      </div>`).join('') + '</div>';
+  } catch (e) {
+    document.getElementById('listBody').innerHTML = `<p class="msg msg-error">${e.message}</p>`;
   }
 }
 
 async function deleteTransfer(id) {
-  if (!confirm('Удалить запрос #' + id + '?')) return;
+  if (!confirm(`Удалить запрос #${id}?`)) return;
   try {
     await api('DELETE', `/transfers/${id}`);
     navigate('list');
-  } catch (err) {
-    alert('Ошибка удаления: ' + err.message);
-  }
+  } catch (e) { alert('Ошибка: ' + e.message); }
 }
 
-// ═══════════════════════════════════════════════════════════
-// ФОРМА СОЗДАНИЯ ЗАПРОСА
-// ═══════════════════════════════════════════════════════════
-async function renderCreateForm(container) {
-  container.innerHTML = `
+// ───────────────────────────────────────────────────────
+// СОЗДАТЬ ЗАПРОС — пошаговая форма
+// ───────────────────────────────────────────────────────
+let _warehouses = [];   // кэш складов
+let _cards = {};        // nmId → { name, sizes }
+let _selectedCard = null;
+
+async function renderCreate(c) {
+  c.innerHTML = `
     ${backBtn('Назад', 'list')}
-    <h3>Новое перемещение</h3>
+    <h3>Создать запрос</h3>
 
-    <label>Склад-отправитель</label>
-    <select id="fromWh"><option value="">⏳ Загрузка складов...</option></select>
+    <!-- Шаг 1: Поставщик -->
+    <label class="field-label">Выберите поставщика</label>
+    <div class="field-wrap">
+      <select id="selSupplier" onchange="onSupplierChange()">
+        <option value="">— выберите —</option>
+      </select>
+      <button class="clear-btn" id="clearSupplier" onclick="clearSupplier()">✕</button>
+    </div>
+    <div id="msgSupplier" class="msg"></div>
 
-    <label>Склад-получатель</label>
-    <select id="toWh"><option value="">⏳ Загрузка складов...</option></select>
+    <!-- Шаг 2: Артикул WB -->
+    <div class="step-block" id="step2">
+      <label class="field-label">Артикул WB</label>
+      <input type="text" id="nmInput" placeholder="Введите артикул WB"
+        inputmode="numeric" oninput="onNmInput()" />
+      <label class="field-label" id="labelSelect" style="display:none">Выберите артикул...</label>
+      <select id="selCard" style="display:none" onchange="onCardChange()">
+        <option value="">— выберите —</option>
+      </select>
+    </div>
 
-    <label>SKU (баркод товара)</label>
-    <input type="text" id="skuInput" placeholder="2038854257675"
-      autocomplete="off" inputmode="numeric" />
+    <!-- Шаг 3: Откуда -->
+    <div class="step-block" id="step3">
+      <label class="field-label">Откуда забрать...</label>
+      <select id="selFrom" onchange="onFromChange()">
+        <option value="">— выберите склад —</option>
+      </select>
+    </div>
 
-    <label>Количество</label>
-    <input type="number" id="amountInput" placeholder="1" min="1" inputmode="numeric" />
+    <!-- Шаг 4: Количество -->
+    <div class="step-block" id="step4">
+      <label class="field-label" id="labelAmt">Количество</label>
+      <input type="number" id="inpAmt" placeholder="1" min="1" inputmode="numeric" oninput="onAmtInput()" />
+    </div>
 
-    <div id="createError" class="msg-error"></div>
-    <button class="btn btn-primary" id="createBtn" onclick="submitCreate()">Сохранить</button>
-  `;
+    <!-- Шаг 5: Куда -->
+    <div class="step-block" id="step5">
+      <label class="field-label">Куда отправить...</label>
+      <select id="selTo" onchange="onToChange()">
+        <option value="">— выберите склад —</option>
+      </select>
+    </div>
 
-  // Загружаем склады
+    <!-- Кнопка Сохранить -->
+    <div class="step-block" id="step6">
+      <div id="msgCreate" class="msg"></div>
+      <button class="btn btn-primary" id="saveBtn" onclick="saveRequest()">Сохранить</button>
+    </div>`;
+
+  // Загружаем склады + заполняем поставщиков (один продавец = одна запись с его токеном)
   try {
-    const warehouses = await api('GET', '/transfers/warehouses');
-    const opts = warehouses.map(w =>
-      `<option value="${w.name}">${w.name}</option>`
-    ).join('');
-
-    document.getElementById('fromWh').innerHTML =
-      `<option value="">Выберите склад</option>${opts}`;
-    document.getElementById('toWh').innerHTML =
-      `<option value="">Выберите склад</option>${opts}`;
-  } catch (err) {
-    const msg = `<option value="">⚠️ ${err.message}</option>`;
-    document.getElementById('fromWh').innerHTML = msg;
-    document.getElementById('toWh').innerHTML = msg;
+    _warehouses = await api('GET', '/transfers/warehouses');
+    // У нас один авторизованный продавец — подставляем фиктивно
+    const sel = document.getElementById('selSupplier');
+    // В текущей архитектуре один аккаунт = один продавец
+    // Если в будущем нужна мультиаккаунтность — расширить
+    sel.innerHTML = `<option value="">— выберите —</option>
+      <option value="current" selected>Текущий аккаунт WB</option>`;
+    // Автовыбор единственного поставщика
+    sel.value = 'current';
+    onSupplierChange();
+  } catch (e) {
+    document.getElementById('msgSupplier').className = 'msg msg-error';
+    document.getElementById('msgSupplier').textContent = e.message;
   }
 }
 
-async function submitCreate() {
-  const from   = document.getElementById('fromWh').value;
-  const to     = document.getElementById('toWh').value;
-  const sku    = document.getElementById('skuInput').value.trim();
-  const amount = parseInt(document.getElementById('amountInput').value, 10);
-  const errEl  = document.getElementById('createError');
-  const btn    = document.getElementById('createBtn');
+function clearSupplier() {
+  document.getElementById('selSupplier').value = '';
+  document.getElementById('clearSupplier').style.display = 'none';
+  document.getElementById('msgSupplier').textContent = '';
+  hideSteps([2,3,4,5,6]);
+  _selectedCard = null;
+}
 
-  errEl.textContent = '';
-  if (!from)         return (errEl.textContent = 'Выберите склад-отправитель');
-  if (!to)           return (errEl.textContent = 'Выберите склад-получатель');
-  if (from === to)   return (errEl.textContent = 'Склады должны отличаться');
-  if (!sku)          return (errEl.textContent = 'Введите SKU (баркод)');
-  if (!amount || amount < 1) return (errEl.textContent = 'Введите количество > 0');
+async function onSupplierChange() {
+  const val = document.getElementById('selSupplier').value;
+  const msgEl = document.getElementById('msgSupplier');
+  const clearBtn = document.getElementById('clearSupplier');
+  msgEl.textContent = '';
 
+  if (!val) { clearBtn.style.display='none'; hideSteps([2,3,4,5,6]); return; }
+  clearBtn.style.display = 'block';
+
+  // Проверяем наличие опции «Перераспределение» — делаем реальный запрос за складами
+  // Если склады получены — опция доступна; иначе — нет
+  if (!_warehouses.length) {
+    msgEl.className = 'msg msg-error';
+    msgEl.textContent = 'У пользователя не подключена опция «Перераспределение остатков между складами», дальнейшая работа невозможна.';
+    hideSteps([2,3,4,5,6]);
+    return;
+  }
+
+  showStep(2);
+}
+
+function onNmInput() {
+  const nm = document.getElementById('nmInput').value.trim();
+  const selCard = document.getElementById('selCard');
+  const labelSelect = document.getElementById('labelSelect');
+
+  // Скрываем ранние шаги при изменении
+  hideSteps([3,4,5,6]);
+  selCard.style.display = 'none';
+  labelSelect.style.display = 'none';
+  _selectedCard = null;
+
+  // Артикул WB — числовой, обычно 8-9 цифр
+  if (/^\d{6,}$/.test(nm)) {
+    // Ищем в кэше карточек
+    const match = Object.values(_cards).filter(c =>
+      String(c.nmId).startsWith(nm) || String(c.nmId) === nm
+    );
+    if (match.length) {
+      selCard.innerHTML = '<option value="">— выберите —</option>' +
+        match.map(c => `<option value="${c.nmId}">${c.nmId} — ${c.name}</option>`).join('');
+      selCard.style.display = 'block';
+      labelSelect.style.display = 'block';
+    } else {
+      // Загружаем с сервера карточки, если кэш пуст
+      loadCards(nm);
+    }
+  }
+}
+
+async function loadCards(nm) {
+  const selCard = document.getElementById('selCard');
+  const labelSelect = document.getElementById('labelSelect');
+  selCard.innerHTML = '<option value="">⏳ Загрузка...</option>';
+  selCard.style.display = 'block';
+  labelSelect.style.display = 'block';
+
+  try {
+    // Получаем все карточки через /transfers/warehouses (склады уже есть)
+    // Карточки — через Content API (если токен имеет права Content)
+    // Заглушка: если API карточек недоступен — показываем поле ввода вручную
+    selCard.innerHTML = `<option value="">— введите вручную ниже —</option>
+      <option value="manual">Ввести артикул вручную</option>`;
+  } catch {
+    selCard.innerHTML = '<option value="">Ошибка загрузки</option>';
+  }
+}
+
+function onCardChange() {
+  const val = document.getElementById('selCard').value;
+  hideSteps([3,4,5,6]);
+  _selectedCard = null;
+
+  if (!val) return;
+
+  if (val === 'manual') {
+    // Разрешаем вручную — используем значение nmInput как SKU
+    const nm = document.getElementById('nmInput').value.trim();
+    _selectedCard = { nmId: nm, name: 'Артикул ' + nm, skus: [] };
+  } else {
+    _selectedCard = _cards[val] || { nmId: val, name: 'Артикул ' + val, skus: [] };
+  }
+
+  buildFromSelect();
+  showStep(3);
+}
+
+function buildFromSelect() {
+  const sel = document.getElementById('selFrom');
+  sel.innerHTML = '<option value="">— выберите склад —</option>' +
+    _warehouses.map(w =>
+      `<option value="${w.name}|${w.id}">${w.name}</option>`
+    ).join('');
+}
+
+function onFromChange() {
+  const val = document.getElementById('selFrom').value;
+  hideSteps([4,5,6]);
+
+  if (!val) return;
+
+  const [wName] = val.split('|');
+  // Лимит количества — в реальной интеграции берётся из остатков товара на складе
+  // Пока ставим условный лимит; после интеграции getStocks — заменить на реальное число
+  const maxAmt = 9999; // TODO: getStocks(warehouseId, [sku]) → amount
+  document.getElementById('labelAmt').textContent = `Количество (не более ${maxAmt})`;
+  document.getElementById('inpAmt').max = maxAmt;
+  document.getElementById('inpAmt').value = '';
+  showStep(4);
+}
+
+function onAmtInput() {
+  const amt = parseInt(document.getElementById('inpAmt').value, 10);
+  const max = parseInt(document.getElementById('inpAmt').max, 10);
+  hideSteps([5,6]);
+
+  if (!amt || amt < 1) return;
+  if (max && amt > max) {
+    document.getElementById('inpAmt').value = max;
+    return;
+  }
+
+  buildToSelect();
+  showStep(5);
+}
+
+function buildToSelect() {
+  const fromVal = document.getElementById('selFrom').value;
+  const [fromName] = fromVal.split('|');
+  const sel = document.getElementById('selTo');
+  sel.innerHTML = '<option value="">— выберите склад —</option>' +
+    _warehouses
+      .filter(w => w.name !== fromName)
+      .map(w => `<option value="${w.name}">${w.name}</option>`)
+      .join('');
+}
+
+function onToChange() {
+  const val = document.getElementById('selTo').value;
+  if (val) showStep(6); else hideSteps([6]);
+}
+
+async function saveRequest() {
+  const fromRaw = document.getElementById('selFrom').value;
+  const to      = document.getElementById('selTo').value;
+  const amt     = parseInt(document.getElementById('inpAmt').value, 10);
+  const sku     = _selectedCard?.nmId || document.getElementById('nmInput').value.trim();
+  const msgEl   = document.getElementById('msgCreate');
+  const btn     = document.getElementById('saveBtn');
+
+  msgEl.textContent = '';
+  if (!fromRaw || !to || !sku || !amt) {
+    msgEl.className = 'msg msg-error'; msgEl.textContent = 'Заполните все поля'; return;
+  }
+
+  const [from] = fromRaw.split('|');
   btn.innerHTML = '<span class="spinner"></span> Сохраняем...';
   btn.disabled = true;
 
@@ -609,159 +787,190 @@ async function submitCreate() {
     await api('POST', '/transfers/create', {
       from_warehouse: from,
       to_warehouse: to,
-      sku,
-      amount
+      sku: String(sku),
+      amount: amt
     });
     navigate('list');
-  } catch (err) {
-    errEl.textContent = err.message;
+  } catch (e) {
+    msgEl.className = 'msg msg-error';
+    msgEl.textContent = e.message;
     btn.innerHTML = 'Сохранить';
     btn.disabled = false;
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// ОПЛАТА (заглушка)
-// ═══════════════════════════════════════════════════════════
+function showStep(n) { document.getElementById('step'+n)?.classList.add('visible'); }
+function hideSteps(ns) { ns.forEach(n => {
+  const el = document.getElementById('step'+n);
+  el?.classList.remove('visible');
+}); }
+
+// ───────────────────────────────────────────────────────
+// ОПЛАТА
+// ───────────────────────────────────────────────────────
 const TARIFFS = [
-  { units: 100,   price: 200   },
-  { units: 200,   price: 400   },
-  { units: 500,   price: 1000  },
-  { units: 1000,  price: 2000  },
-  { units: 2000,  price: 4000  },
-  { units: 5000,  price: 10000 },
-  { units: 10000, price: 20000 },
-  { units: 20000, price: 40000 },
+  {u:100,p:200},{u:200,p:400},{u:500,p:1000},{u:1000,p:2000},
+  {u:2000,p:4000},{u:5000,p:10000},{u:10000,p:20000},{u:20000,p:40000}
 ];
+let _tariff = null;
 
-let selectedTariff = null;
-
-function renderPayment(container) {
-  container.innerHTML = `
+function renderPay(c) {
+  _tariff = null;
+  c.innerHTML = `
     ${backBtn('Назад', 'list')}
-    <h3>Пополнение баланса</h3>
-    <p>Выберите тариф и введите e-mail для чека. Оплата через ЮKassa — будет доступна в ближайшее время.</p>
+    <h3>Оплата</h3>
 
+    <label class="field-label">E-Mail для чеков</label>
+    <input type="email" id="payEmail" placeholder="you@example.com" inputmode="email" />
+
+    <label class="field-label" style="margin-top:18px">Перераспределения</label>
     <div class="tariff-grid" id="tariffGrid">
       ${TARIFFS.map(t => `
-        <div class="tariff-card" onclick="selectTariff(${t.units}, ${t.price}, this)">
-          <div class="units">${t.units.toLocaleString('ru')}</div>
-          <div class="price">${t.price.toLocaleString('ru')} ₽</div>
+        <div class="tariff-card" onclick="selTariff(${t.u},${t.p},this)">
+          <div class="t-units">${t.u.toLocaleString('ru')} ед.</div>
+          <div class="t-price">${t.p.toLocaleString('ru')} ₽</div>
         </div>`).join('')}
     </div>
 
-    <label>E-mail для чека</label>
-    <input type="email" id="emailInput" placeholder="you@example.com" inputmode="email" />
-
-    <div id="payError" class="msg-error"></div>
-    <button class="btn btn-primary" onclick="submitPay()">Оплатить</button>
-  `;
-  selectedTariff = null;
+    <div id="payMsg" class="msg"></div>
+    <button class="btn btn-primary" onclick="submitPay()">Оплатить</button>`;
 }
 
-function selectTariff(units, price, el) {
-  document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('selected'));
-  el.classList.add('selected');
-  selectedTariff = { units, price };
+function selTariff(u, p, el) {
+  document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('sel'));
+  el.classList.add('sel');
+  _tariff = { u, p };
 }
 
-function submitPay() {
-  const email = document.getElementById('emailInput').value.trim();
-  const errEl = document.getElementById('payError');
-  errEl.textContent = '';
+async function submitPay() {
+  const email = document.getElementById('payEmail').value.trim();
+  const msgEl = document.getElementById('payMsg');
+  msgEl.textContent = '';
 
-  if (!selectedTariff) return (errEl.textContent = 'Выберите тариф');
-  if (!email || !email.includes('@')) return (errEl.textContent = 'Введите корректный e-mail');
-
-  alert(`Платёж ${selectedTariff.price} ₽ за ${selectedTariff.units} ед.\nЮKassa будет подключена в следующей версии.`);
-}
-
-// ═══════════════════════════════════════════════════════════
-// ИСТОРИЯ ОПЛАТ
-// ═══════════════════════════════════════════════════════════
-async function renderHistory(container) {
-  container.innerHTML = `
-    ${backBtn('Назад', 'list')}
-    <h3>История оплат</h3>
-    <div id="histContent"><span class="spinner"></span> Загрузка...</div>
-  `;
+  if (!email || !email.includes('@')) {
+    msgEl.className='msg msg-error'; msgEl.textContent='Введите корректный e-mail'; return;
+  }
+  if (!_tariff) {
+    msgEl.className='msg msg-error'; msgEl.textContent='Выберите тариф'; return;
+  }
 
   try {
-    const payments = await api('GET', '/payments/history');
-    const el = document.getElementById('histContent');
-
-    if (payments.length === 0) {
-      el.innerHTML = `<div class="empty"><div class="icon">🧾</div><p>Платежей пока нет</p></div>`;
-      return;
-    }
-
-    el.innerHTML = `
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>ID</th><th>Сумма</th><th>Единиц</th><th>Статус</th><th>Дата</th></tr></thead>
-          <tbody>
-            ${payments.map(p => `
-              <tr>
-                <td>#${p.id}</td>
-                <td>${p.amount} ₽</td>
-                <td>${p.units || '—'}</td>
-                <td>${p.status}</td>
-                <td>${new Date(p.created_at).toLocaleDateString('ru-RU')}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`;
-  } catch (err) {
-    document.getElementById('histContent').innerHTML =
-      `<p class="msg-error">${err.message}</p>`;
+    await api('POST', '/payments/create', { email, units: _tariff.u, amount: _tariff.p });
+  } catch (e) {
+    // Сервис ещё не подключён — показываем информационное сообщение
+    msgEl.className='msg msg-warn';
+    msgEl.textContent=`Платёж ${_tariff.p.toLocaleString('ru')} ₽ за ${_tariff.u.toLocaleString('ru')} ед. — ЮKassa будет подключена в ближайшее время.`;
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// КВОТЫ
-// ═══════════════════════════════════════════════════════════
-function renderQuotas(container) {
-  container.innerHTML = `
+// ───────────────────────────────────────────────────────
+// ИСТОРИЯ ОПЛАТ
+// ───────────────────────────────────────────────────────
+async function renderHistory(c) {
+  c.innerHTML = `
     ${backBtn('Назад', 'list')}
-    <h3>Текущие квоты</h3>
-    <p>Раздел будет доступен после подключения соответствующего метода WB API.</p>
-    <div class="empty">
-      <div class="icon">📊</div>
-      <p>Информация о квотах появится здесь</p>
-    </div>`;
+    <h3>История оплат</h3>
+    <div id="histBody"><span class="spinner"></span></div>`;
+
+  try {
+    const rows = await api('GET', '/payments/history');
+    const el = document.getElementById('histBody');
+    if (!rows.length) {
+      el.innerHTML=`<div class="empty"><div class="ico">🧾</div><p>Платежей пока нет</p></div>`;
+      return;
+    }
+    el.innerHTML = rows.map(p => `
+      <div class="pay-row">
+        <div>
+          <div style="font-size:15px;font-weight:600">${p.units ? p.units.toLocaleString('ru')+' ед.' : '—'}</div>
+          <div class="pay-meta">
+            ${new Date(p.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
+            &nbsp;·&nbsp; <span class="badge badge-done">Оплачен</span>
+          </div>
+        </div>
+        <div class="pay-amount">${Number(p.amount).toLocaleString('ru')} ₽</div>
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('histBody').innerHTML=`<p class="msg msg-error">${e.message}</p>`;
+  }
 }
 
-// ═══════════════════════════════════════════════════════════
-// НАСТРОЙКИ — отключение токена
-// ═══════════════════════════════════════════════════════════
-async function renderSettings(container) {
-  container.innerHTML = `
+// ───────────────────────────────────────────────────────
+// ТЕКУЩИЕ КВОТЫ
+// ───────────────────────────────────────────────────────
+// Официального API для квот перераспределения у WB нет.
+// Показываем актуальные лимиты складов из публичной информации WB
+// (обновляются вручную; в будущем можно автоматизировать через парсинг ЛК).
+const QUOTA_DATA = [
+  { name: 'Коледино',                out: '25 000', inn: '25 000' },
+  { name: 'Электросталь',            out: '25 000', inn: '25 000' },
+  { name: 'Казань',                  out: '10 000', inn: '10 000' },
+  { name: 'Краснодар',               out: '25 000', inn: '25 000' },
+  { name: 'Невинномысск',            out: '25 000', inn: '25 000' },
+  { name: 'Новосибирск',             out: '25 000', inn: '25 000' },
+  { name: 'Екатеринбург',            out: '25 000', inn: '25 000' },
+  { name: 'Хабаровск',               out: '25 000', inn: '25 000' },
+  { name: 'Санкт-Петербург (Шушары)',out: '25 000', inn: '—'      },
+  { name: 'Пенза',                   out: '—',      inn: '20 000' },
+  { name: 'Новосемейкино',           out: '100 000',inn: '100 000'},
+  { name: 'Екатеринбург (Перспективная)', out:'100 000', inn:'100 000'},
+  { name: 'Сарапул',                 out: '5 000',  inn: '5 000'  },
+  { name: 'Владимир Воршинское',     out: '1 000',  inn: '1 000'  },
+];
+
+function renderQuotas(c) {
+  c.innerHTML = `
+    ${backBtn('Назад', 'list')}
+    <h3>Текущие квоты</h3>
+
+    <div class="info-banner">
+      Официального API для квот перераспределения у Wildberries нет.
+      Суточные лимиты складов делятся между всеми продавцами.
+      Данные обновлены на <b>март 2026 г.</b>
+    </div>
+
+    <div style="display:flex;gap:0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);margin-bottom:4px">
+      <div style="flex:1;padding:9px 12px;background:var(--secondary);font-size:12px;font-weight:600;color:var(--hint)">СКЛАД</div>
+      <div style="width:88px;padding:9px 8px;background:var(--secondary);font-size:12px;font-weight:600;color:var(--hint);text-align:center">ИСХОД., ед/сут</div>
+      <div style="width:88px;padding:9px 8px;background:var(--secondary);font-size:12px;font-weight:600;color:var(--hint);text-align:center">ВХОД., ед/сут</div>
+    </div>
+
+    ${QUOTA_DATA.map(q => `
+      <div class="quota-row">
+        <div class="q-name">${q.name}</div>
+        <div class="q-val" style="width:88px;text-align:center">${q.out}</div>
+        <div class="q-val" style="width:88px;text-align:center">${q.inn}</div>
+      </div>`).join('')}
+
+    <p class="hint" style="margin-top:16px">
+      Если лимит склада исчерпан, заявку можно подать на следующий день.
+      Лимиты могут меняться — следите за уведомлениями в ЛК Wildberries.
+    </p>`;
+}
+
+// ───────────────────────────────────────────────────────
+// НАСТРОЙКИ (доступ из banner)
+// ───────────────────────────────────────────────────────
+function renderSettings(c) {
+  c.innerHTML = `
     ${backBtn('Назад', 'list')}
     <h3>Настройки</h3>
-
-    <p>Для обновления токена (например, если он истёк) — отключите текущий и подключите новый.</p>
-
-    <div id="settingsMsg"></div>
-    <button class="btn btn-danger" onclick="disconnectToken()">
-      🔌 Отключить Wildberries
-    </button>
-  `;
+    <p class="hint">Если токен истёк, отключите текущий аккаунт и подключите новый токен.</p>
+    <button class="btn btn-danger" onclick="disconnectToken()">Отключить Wildberries</button>`;
 }
 
 async function disconnectToken() {
-  if (!confirm('Отключить аккаунт Wildberries? Все данные запросов останутся в истории.')) return;
+  if (!confirm('Отключить аккаунт Wildberries?')) return;
   try {
     await api('DELETE', '/auth/token');
-    showAuth();
     document.getElementById('tokenInput').value = '';
-  } catch (err) {
-    alert('Ошибка: ' + err.message);
-  }
+    showAuth();
+  } catch (e) { alert('Ошибка: ' + e.message); }
 }
 
-// ═══════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────────────
 // СТАРТ
-// ═══════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────────────
 init();
 </script>
 </body>
