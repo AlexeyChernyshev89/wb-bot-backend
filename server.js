@@ -69,9 +69,32 @@ async function initDB() {
   console.log('✅ Таблицы БД проверены/созданы');
 }
 
-db.connect()
-  .then(() => { console.log('✅ PostgreSQL подключён'); return initDB(); })
-  .catch(err => { console.error('❌ Ошибка подключения к БД:', err); process.exit(1); });
+// Флаг готовности БД — маршруты возвращают 503 пока БД не поднялась
+let dbReady = false;
+
+async function connectDB(attempt = 1) {
+  try {
+    await db.connect();
+    console.log('✅ PostgreSQL подключён');
+    await initDB();
+    dbReady = true;
+  } catch (err) {
+    const delay = Math.min(attempt * 2000, 30000); // макс 30 сек между попытками
+    console.error(`❌ Ошибка подключения к БД (попытка ${attempt}):`, err.message);
+    console.log(`🔄 Повтор через ${delay / 1000} сек...`);
+    setTimeout(() => connectDB(attempt + 1), delay);
+  }
+}
+
+// Middleware: проверяем готовность БД перед каждым API-запросом
+function requireDB(req, res, next) {
+  if (!dbReady) {
+    return res.status(503).json({ error: 'База данных недоступна, сервер запускается. Попробуйте через несколько секунд.' });
+  }
+  next();
+}
+
+connectDB();
 
 // ─── Telegram Auth Middleware ─────────────────────────────────────────────────
 async function telegramAuth(req, res, next) {
@@ -122,7 +145,7 @@ async function getUserToken(telegramId) {
  * затем сохраняет в БД. Токен генерируется продавцом в ЛК:
  * Профиль → Настройки → Доступ к API → Создать токен (категория: Marketplace)
  */
-app.post('/auth/set-token', telegramAuth, async (req, res) => {
+app.post('/auth/set-token', telegramAuth, requireDB, async (req, res) => {
   const { token } = req.body;
   if (!token || token.trim().length < 10) {
     return res.status(400).json({ error: 'Введите API-токен Wildberries' });
@@ -167,7 +190,7 @@ app.post('/auth/set-token', telegramAuth, async (req, res) => {
  * GET /auth/status
  * Возвращает статус авторизации и мета-информацию о токене.
  */
-app.get('/auth/status', telegramAuth, async (req, res) => {
+app.get('/auth/status', telegramAuth, requireDB, async (req, res) => {
   try {
     const result = await db.query(
       'SELECT wb_token, wb_token_info, updated_at FROM users WHERE telegram_id = $1',
@@ -202,7 +225,7 @@ app.get('/auth/status', telegramAuth, async (req, res) => {
  * DELETE /auth/token
  * Отключить WB-аккаунт (удалить токен).
  */
-app.delete('/auth/token', telegramAuth, async (req, res) => {
+app.delete('/auth/token', telegramAuth, requireDB, async (req, res) => {
   try {
     await db.query(
       'UPDATE users SET wb_token = NULL, wb_token_info = NULL, updated_at = NOW() WHERE telegram_id = $1',
@@ -223,7 +246,7 @@ app.delete('/auth/token', telegramAuth, async (req, res) => {
  * Список складов продавца.
  * WB API: GET /api/v3/warehouses
  */
-app.get('/transfers/warehouses', telegramAuth, async (req, res) => {
+app.get('/transfers/warehouses', telegramAuth, requireDB, async (req, res) => {
   try {
     const token = await getUserToken(req.telegramId);
     if (!token) return res.status(401).json({ error: 'Сначала подключите Wildberries API-токен' });
@@ -245,7 +268,7 @@ app.get('/transfers/warehouses', telegramAuth, async (req, res) => {
  *
  * Если skus не переданы — автоматически получает все баркоды из карточек (требует токен с Content).
  */
-app.post('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
+app.post('/transfers/stocks/:warehouseId', telegramAuth, requireDB, async (req, res) => {
   const { warehouseId } = req.params;
   let { skus } = req.body;
 
@@ -281,7 +304,7 @@ app.post('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
  * GET /transfers/stocks/:warehouseId  (совместимость со старым фронтендом)
  * skus передаются через query-параметр: ?skus=sku1,sku2
  */
-app.get('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
+app.get('/transfers/stocks/:warehouseId', telegramAuth, requireDB, async (req, res) => {
   const { warehouseId } = req.params;
   const skusParam = req.query.skus;
   const skus = skusParam ? skusParam.split(',').map(s => s.trim()).filter(Boolean) : [];
@@ -306,7 +329,7 @@ app.get('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
  * Обновить остатки на складе.
  * WB API: PUT /api/v3/stocks/{warehouseId}  body: { stocks: [{ sku, amount }] }
  */
-app.put('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
+app.put('/transfers/stocks/:warehouseId', telegramAuth, requireDB, async (req, res) => {
   const { warehouseId } = req.params;
   const { stocks } = req.body;
 
@@ -336,7 +359,7 @@ app.put('/transfers/stocks/:warehouseId', telegramAuth, async (req, res) => {
  * POST /transfers/create
  * Создать запрос на перемещение товара между складами.
  */
-app.post('/transfers/create', telegramAuth, async (req, res) => {
+app.post('/transfers/create', telegramAuth, requireDB, async (req, res) => {
   const { from_warehouse, to_warehouse, sku, amount } = req.body;
 
   if (!from_warehouse || !to_warehouse || !sku || !amount) {
@@ -366,7 +389,7 @@ app.post('/transfers/create', telegramAuth, async (req, res) => {
  * GET /transfers/list
  * Список запросов на перемещение текущего пользователя.
  */
-app.get('/transfers/list', telegramAuth, async (req, res) => {
+app.get('/transfers/list', telegramAuth, requireDB, async (req, res) => {
   try {
     const result = await db.query(
       'SELECT * FROM transfer_requests WHERE user_id = $1 ORDER BY created_at DESC',
@@ -382,7 +405,7 @@ app.get('/transfers/list', telegramAuth, async (req, res) => {
  * DELETE /transfers/:id
  * Удалить запрос на перемещение (только свой, только в статусе pending).
  */
-app.delete('/transfers/:id', telegramAuth, async (req, res) => {
+app.delete('/transfers/:id', telegramAuth, requireDB, async (req, res) => {
   const { id } = req.params;
   if (!Number.isInteger(Number(id))) {
     return res.status(400).json({ error: 'Некорректный ID' });
@@ -415,7 +438,7 @@ app.post('/payments/create', telegramAuth, (req, res) => {
   });
 });
 
-app.get('/payments/history', telegramAuth, async (req, res) => {
+app.get('/payments/history', telegramAuth, requireDB, async (req, res) => {
   try {
     const result = await db.query(
       'SELECT * FROM payments WHERE user_id = $1 ORDER BY created_at DESC',
@@ -434,6 +457,7 @@ app.get('/payments/history', telegramAuth, async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
+    db: dbReady ? 'connected' : 'connecting',
     test_mode: TEST_MODE,
     timestamp: new Date().toISOString()
   });
