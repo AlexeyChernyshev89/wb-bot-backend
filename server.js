@@ -555,9 +555,115 @@ app.get('/check-files', (req, res) => {
   res.json({ rootFiles, publicFiles, test_mode: TEST_MODE });
 });
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TELEGRAM BOT — webhook + кнопки Mini App
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const APP_URL = (process.env.APP_URL || '').replace(/\/$/, ''); // убираем слэш в конце
+
+/**
+ * Webhook — принимает updates от Telegram
+ * Telegram шлёт сюда все сообщения боту
+ */
+app.post('/webhook', async (req, res) => {
+  res.sendStatus(200); // Telegram требует быстрый 200 OK
+
+  const update = req.body;
+  if (!update) return;
+
+  const message  = update.message;
+  const callback = update.callback_query;
+
+  try {
+    if (message) {
+      const chatId = message.chat.id;
+      const text   = message.text || '';
+
+      if (text.startsWith('/start')) {
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: '👋 Добро пожаловать в *WB Supply Helper*\n\nАвтоматизация перераспределения остатков товаров между складами Wildberries.',
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[{
+              text: '🛒 Открыть приложение',
+              web_app: { url: APP_URL }   // ← тип web_app, не url!
+            }]]
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.error('❌ Ошибка обработки webhook:', err.message);
+  }
+});
+
+/**
+ * Вспомогательная функция для вызова Telegram Bot API
+ */
+async function tgApi(method, data) {
+  const res = await axios.post(
+    `https://api.telegram.org/bot${BOT_TOKEN}/${method}`,
+    data,
+    { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
+  );
+  return res.data;
+}
+
+/**
+ * Настройка бота при старте:
+ * - регистрирует webhook URL
+ * - устанавливает кнопку меню типа web_app для всех пользователей
+ */
+async function setupBot() {
+  if (!BOT_TOKEN) {
+    console.warn('⚠️  TELEGRAM_BOT_TOKEN не задан — бот не настроен');
+    return;
+  }
+  if (!APP_URL) {
+    console.warn('⚠️  APP_URL не задан — webhook и кнопка меню не настроены');
+    return;
+  }
+
+  try {
+    // 1. Регистрируем webhook
+    const webhookUrl = `${APP_URL}/webhook`;
+    const wh = await tgApi('setWebhook', {
+      url: webhookUrl,
+      allowed_updates: ['message', 'callback_query'],
+      drop_pending_updates: true
+    });
+    console.log('✅ Webhook установлен:', webhookUrl, '|', wh.description);
+
+    // 2. Устанавливаем кнопку меню типа web_app (для всех чатов)
+    const mb = await tgApi('setChatMenuButton', {
+      menu_button: {
+        type: 'web_app',
+        text: 'Открыть приложение',
+        web_app: { url: APP_URL }
+      }
+    });
+    console.log('✅ Кнопка меню настроена:', mb.description || JSON.stringify(mb));
+
+    // 3. Устанавливаем команды бота
+    await tgApi('setMyCommands', {
+      commands: [
+        { command: 'start', description: 'Открыть WB Supply Helper' }
+      ]
+    });
+    console.log('✅ Команды бота зарегистрированы');
+
+  } catch (err) {
+    console.error('❌ Ошибка настройки бота:', err.response?.data || err.message);
+  }
+}
 // ─── Запуск ───────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
   console.log(`🔧 Тестовый режим: ${TEST_MODE ? 'ВКЛ (telegramId=12345)' : 'ВЫКЛ (проверка Telegram)'}`);
   console.log(`📦 Статика: ${path.join(__dirname, 'public')}`);
+  console.log(`🌐 APP_URL: ${APP_URL || 'не задан'}`);
+  // Настраиваем бота после старта сервера
+  setTimeout(setupBot, 2000);
 });
