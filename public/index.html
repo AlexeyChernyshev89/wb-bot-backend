@@ -777,6 +777,16 @@ async function loadList() {
   }
 }
 
+function statusBadge(s) {
+  const m = {
+    pending: ['badge-pending', '⏳ Ожидает'],
+    done:    ['badge-done',    '✅ Выполнен'],
+    failed:  ['badge-failed',  '❌ Ошибка']
+  };
+  const [cls, lbl] = m[s] || ['badge-pending', s];
+  return `<span class="badge ${cls}">${lbl}</span>`;
+}
+
 function renderTransfers() {
   const rows = _allTransfers.filter(r => _curTab === 'cur' ? r.status === 'pending' : r.status !== 'pending');
   const el = document.getElementById('listBody');
@@ -787,6 +797,12 @@ function renderTransfers() {
   el.innerHTML = rows.map(r => {
     const d = new Date(r.created_at);
     const date = `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+    const retryHtml = r.retry_count > 0
+      ? `<div style="font-size:11px;color:var(--warning);margin-top:3px">🔄 Попыток: ${r.retry_count}${r.next_retry_at ? ' · след: ' + new Date(r.next_retry_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : ''}</div>`
+      : '';
+    const errHtml = r.error_message
+      ? `<div style="font-size:11px;color:var(--danger);margin-top:3px;word-break:break-word">⚠️ ${r.error_message}</div>`
+      : '';
     return `
     <div class="transfer-row">
       <div class="tr-header">
@@ -799,7 +815,11 @@ function renderTransfers() {
         <span>${r.to_warehouse}</span>
       </div>
       <div class="tr-footer">
-        <div class="tr-meta">Арт: <b>${r.sku}</b> &nbsp; Кол-во: <b>${r.amount}</b></div>
+        <div class="tr-meta" style="flex:1;min-width:0">
+          Арт: <b>${r.sku}</b> &nbsp; Кол-во: <b>${r.amount}</b>
+          <div style="margin-top:4px">${statusBadge(r.status)}</div>
+          ${retryHtml}${errHtml}
+        </div>
         <div class="tr-actions">
           ${r.status==='pending' ? `<button class="icon-btn icon-btn-edit" onclick="editQty(${r.id},${r.amount})" title="Редактировать">✏️</button>` : ''}
           <button class="icon-btn icon-btn-del" onclick="delTransfer(${r.id})" title="Удалить">🗑</button>
@@ -977,18 +997,30 @@ function onQtyInput() {
 }
 
 function buildToDrop() {
-  const all = _state.card?.warehouses || [];
   const drop = document.getElementById('dropTo');
-  // Показываем все склады из WB, исключая выбранный
-  const fromName = _state.from;
-  const list = all.length
-    ? all.filter(w => w.name !== fromName)
-    : [];
-  // Если список пустой — показываем все склады из кэша
-  const items = list.length ? list.map(w=>w.name) : _whCache.filter(w=>w.name!==fromName).map(w=>w.name);
+  const fromName = _state.from || '';
+
+  // Приоритет: WB FBO склады из Statistics API
+  // Фильтруем склад-отправитель из списка
+  let items = _wbWhCache.filter(n => n !== fromName);
+
+  // Fallback: если WB-склады не загружены — используем QUOTA_DATA
+  if (!items.length) {
+    items = QUOTA_DATA.map(q => q.name).filter(n => n !== fromName);
+  }
+
+  if (!items.length) {
+    drop.innerHTML = '<div class="dropdown-item" style="color:var(--text2)">Склады не загружены. Проверьте токен (нужна категория Статистика)</div>';
+    return;
+  }
+
   drop.innerHTML = items.map(n =>
-    `<div class="dropdown-item" onclick="selectTo('${n}')">${n}</div>`
-  ).join('') || '<div class="dropdown-item" style="color:var(--text2)">Нет доступных складов</div>';
+    `<div class="dropdown-item" onclick="selectTo('${escHtml(n)}')">${n}</div>`
+  ).join('');
+}
+
+function escHtml(s) {
+  return s.replace(/'/g, "\'");
 }
 
 function selectTo(name) {
@@ -999,9 +1031,20 @@ function selectTo(name) {
   document.getElementById('stepSave').classList.add('on');
 }
 
-let _whCache = [];
+let _whCache = [];      // FBS склады продавца (для справки)
+let _wbWhCache = [];   // FBO склады WB (для «Куда отправить»)
+
 async function preloadWarehouses() {
-  try { _whCache = await api('GET', '/transfers/warehouses'); } catch {}
+  try {
+    _whCache = await api('GET', '/transfers/warehouses');
+  } catch {}
+  try {
+    const res = await api('GET', '/transfers/wb-warehouses');
+    _wbWhCache = res.warehouses || [];
+    console.log('[preload] WB FBO warehouses:', _wbWhCache.length);
+  } catch(e) {
+    console.warn('[preload] wb-warehouses failed:', e.message);
+  }
 }
 
 async function saveRequest() {
