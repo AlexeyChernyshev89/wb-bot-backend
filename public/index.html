@@ -756,27 +756,39 @@ function go(name) {
 async function authSendSms() {
   const phone = document.getElementById('authPhone').value.trim();
   const btn   = document.getElementById('authPhoneBtn');
-  hideMsg('authPhoneMsg');
 
-  if (!phone) { showMsg('authPhoneMsg','error','Введите номер телефона'); return; }
+  // Сбрасываем сообщение
+  const msgEl = document.getElementById('authPhoneMsg');
+  if (msgEl) { msgEl.style.display = 'none'; msgEl.className = 'msg'; }
+
+  if (!phone) {
+    if (msgEl) { msgEl.style.display = 'block'; msgEl.className = 'msg msg-error show'; msgEl.textContent = 'Введите номер телефона'; }
+    return;
+  }
 
   btn.innerHTML = '<span class="spinner"></span> Отправляем...';
   btn.disabled = true;
 
   try {
-    await api('POST', '/auth/request-sms', { phone });
+    const res = await api('POST', '/auth/request-sms', { phone });
+    // Успех — показываем поле кода
     document.getElementById('authPhoneDisplay').textContent = phone;
     document.getElementById('authPhoneStep').style.display = 'none';
     document.getElementById('authCodeStep').style.display  = 'block';
     setTimeout(() => document.getElementById('authCode')?.focus(), 100);
   } catch(e) {
-    console.error('[SMS] authSendSms error:', e.message);
-    showMsg('authPhoneMsg','error', e.message || 'Ошибка отправки SMS');
+    // Показываем ошибку — и через alert на случай если CSS не работает
+    const errText = e.message || 'Ошибка отправки SMS';
+    if (msgEl) {
+      msgEl.style.display = 'block';
+      msgEl.className = 'msg msg-error show';
+      msgEl.textContent = errText;
+    }
+    alert('Ошибка: ' + errText);
     btn.innerHTML = '📲 Получить SMS-код';
     btn.disabled = false;
   }
 }
-
 async function authVerifySms() {
   const code = document.getElementById('authCode').value.trim();
   const btn  = document.getElementById('authCodeBtn');

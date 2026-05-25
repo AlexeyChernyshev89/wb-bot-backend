@@ -529,6 +529,19 @@ app.patch('/transfers/:id', telegramAuth, requireDB, async (req, res) => {
  * POST /auth/request-sms
  * Шаг 1: Запросить SMS-код на телефон продавца.
  */
+
+// ─── DEBUG: тест SMS эндпоинта WB (убрать после отладки) ─────────────────────
+app.post('/debug-sms', async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'phone required' });
+  try {
+    const result = await requestSmsCode(phone);
+    res.json({ result, env: { hasToken: !!BOT_TOKEN, testMode: TEST_MODE } });
+  } catch(err) {
+    res.status(500).json({ error: err.message, stack: err.stack?.split('\n').slice(0,5) });
+  }
+});
+
 app.post('/auth/request-sms', telegramAuth, requireDB, async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
