@@ -393,6 +393,10 @@
       <span class="menu-icon">↑↓</span> Статистика перемещений
       <span class="menu-chevron">›</span>
     </button>
+    <button class="menu-item" onclick="go('updateToken')">
+      <span class="menu-icon">🔑</span> Обновить токен WB
+      <span class="menu-chevron">›</span>
+    </button>
   </div>
 </div>
 
@@ -594,6 +598,58 @@
   </div>
 </div>
 
+
+<!-- ═══════ UPDATE TOKEN ═══════ -->
+<div id="screenUpdateToken" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('main')">‹</button>
+    <span class="screen-title">Обновить токен WB</span>
+  </div>
+
+  <div style="background:var(--surf);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px">
+    <div style="font-size:13px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px">
+      Как создать токен с нужными правами
+    </div>
+    <div class="step-item"><div class="step-num">1</div><span>Откройте <b style="color:var(--text)">seller.wildberries.ru</b></span></div>
+    <div class="step-item"><div class="step-num">2</div><span>Профиль → Настройки → <b style="color:var(--text)">Доступ к API</b></span></div>
+    <div class="step-item"><div class="step-num">3</div><span>Нажмите <b style="color:var(--text)">«Создать новый токен»</b></span></div>
+    <div class="step-item"><div class="step-num">4</div>
+      <span>Выберите все четыре категории:<br>
+        <b style="color:var(--accent)">✓ Маркетплейс (Marketplace)</b> — склады и остатки FBS<br>
+        <b style="color:var(--accent)">✓ Контент (Content)</b> — поиск товаров по артикулу<br>
+        <b style="color:var(--accent)">✓ Статистика (Statistics)</b> — остатки FBO на складах WB<br>
+        <b style="color:var(--accent)">✓ Аналитика (Analytics)</b> — дополнительные данные
+      </span>
+    </div>
+    <div class="step-item"><div class="step-num">5</div><span>Скопируйте токен и вставьте ниже</span></div>
+  </div>
+
+  <div class="info-banner" style="margin-bottom:14px">
+    <span>⚠️</span>
+    <span>Для отображения остатков на складах WB (FBO) обязательно нужна категория <b>Статистика</b>. Без неё поиск товаров будет работать, но склады с остатками показываться не будут.</span>
+  </div>
+
+  <label class="field-label">Новый API-токен Wildberries</label>
+  <div style="position:relative;margin-bottom:4px">
+    <input type="password" id="newTokenInput" class="inp"
+      placeholder="eyJhbGciOiJFUzI1NiIsInR5cCI6Ikp..."
+      autocomplete="off" spellcheck="false"
+      style="padding-right:44px" />
+    <button onclick="toggleTokenVisible()" id="eyeBtn"
+      style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:0">
+      👁
+    </button>
+  </div>
+  <div style="font-size:11px;color:var(--text2);margin-bottom:14px;padding-left:2px">
+    Токен начинается с <span style="color:var(--accent);font-family:monospace">eyJ...</span> и имеет длину около 200 символов
+  </div>
+
+  <div id="updateTokenMsg" class="msg"></div>
+  <button class="btn btn-accent" id="updateTokenBtn" onclick="updateToken()">
+    Сохранить и проверить токен
+  </button>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════════════
 // TELEGRAM
@@ -616,7 +672,7 @@ async function api(method, url, body) {
 // ═══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ═══════════════════════════════════════════════════════
-const screens = ['Auth','Main','List','Create','Batch','Pay','History','Quotas','Stats'];
+const screens = ['Auth','Main','List','Create','Batch','Pay','History','Quotas','Stats','UpdateToken'];
 function go(name) {
   screens.forEach(s => {
     const el = document.getElementById('screen' + s.charAt(0).toUpperCase() + s.slice(1));
@@ -1146,6 +1202,64 @@ function showMsg(id, type, text) {
 document.addEventListener('click', e => {
   if (!e.target.closest('.search-field') && !e.target.closest('.dropdown')) hideAllDrops();
 });
+
+// ═══════════════════════════════════════════════════════
+// ОБНОВЛЕНИЕ ТОКЕНА
+// ═══════════════════════════════════════════════════════
+let _tokenVisible = false;
+
+function toggleTokenVisible() {
+  _tokenVisible = !_tokenVisible;
+  const inp = document.getElementById('newTokenInput');
+  const btn = document.getElementById('eyeBtn');
+  inp.type = _tokenVisible ? 'text' : 'password';
+  btn.textContent = _tokenVisible ? '🙈' : '👁';
+}
+
+async function updateToken() {
+  const token = document.getElementById('newTokenInput').value.trim();
+  const btn   = document.getElementById('updateTokenBtn');
+  showMsg('updateTokenMsg','','');
+  document.getElementById('updateTokenMsg').style.display = 'none';
+
+  if (!token) { showMsg('updateTokenMsg','error','Вставьте новый токен'); return; }
+  if (!token.startsWith('eyJ')) {
+    showMsg('updateTokenMsg','error','Токен должен начинаться с eyJ... Проверьте что скопировали полностью');
+    return;
+  }
+  if (token.length < 100) {
+    showMsg('updateTokenMsg','error','Токен слишком короткий. Скопируйте полностью из ЛК WB');
+    return;
+  }
+
+  btn.innerHTML = '<span class="spinner"></span> Проверяем токен...';
+  btn.disabled = true;
+
+  try {
+    const res = await api('POST', '/auth/set-token', { token });
+    document.getElementById('newTokenInput').value = '';
+    _tokenVisible = false;
+    document.getElementById('newTokenInput').type = 'password';
+
+    // Обновляем баннер на главном экране
+    const banner = document.getElementById('tokenBanner');
+    const bannerText = document.getElementById('tokenBannerText');
+    if (res.expires_at) {
+      banner.style.display = 'flex';
+      bannerText.innerHTML = `WB подключён · токен до <b>${res.expires_at}</b>`;
+    }
+
+    showMsg('updateTokenMsg','success','✅ Токен обновлён и проверен. Теперь доступны остатки FBO.');
+    btn.innerHTML = 'Сохранить и проверить токен';
+    btn.disabled = false;
+
+    setTimeout(() => go('main'), 2000);
+  } catch(e) {
+    showMsg('updateTokenMsg','error', e.message);
+    btn.innerHTML = 'Сохранить и проверить токен';
+    btn.disabled = false;
+  }
+}
 
 // ═══════════════════════════════════════════════════════
 // СТАРТ
