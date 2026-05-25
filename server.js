@@ -9,8 +9,8 @@ const bodyParser = require('body-parser');
 const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
-const { validateWbToken, decodeWbToken } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames } = require('./wb-api');
+const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, createWbTransfer, getWbTransferList } = require('./wb-api');
 const axios = require('axios');
 const path = require('path');
 const fs   = require('fs');
@@ -41,9 +41,20 @@ async function initDB() {
       name        VARCHAR(255),
       username    VARCHAR(255),
       wb_token    TEXT,
-      wb_token_info JSONB,
+      wb_token_info      JSONB,
+      wb_session_token   TEXT,
+      wb_session_updated TIMESTAMP,
       created_at  TIMESTAMP DEFAULT NOW(),
       updated_at  TIMESTAMP DEFAULT NOW()
+    );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS wb_session_token   TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS wb_session_updated TIMESTAMP;
+
+    CREATE TABLE IF NOT EXISTS sms_requests (
+      telegram_id  BIGINT PRIMARY KEY,
+      phone        VARCHAR(20),
+      request_token TEXT,
+      created_at   TIMESTAMP DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS transfer_requests (
@@ -192,6 +203,12 @@ async function telegramAuth(req, res, next) {
     console.error('[TG Auth] initData snippet:', authData.substring(0, 120));
     return res.status(403).json({ error: 'Недействительные данные Telegram: ' + error.message });
   }
+}
+
+// ─── Вспомогательные функции ─────────────────────────────────────────────────
+async function getUserSessionToken(telegramId) {
+  const r = await db.query('SELECT wb_session_token FROM users WHERE telegram_id=$1', [telegramId]);
+  return r.rows[0]?.wb_session_token || null;
 }
 
 // ─── Вспомогательная функция: получить wb_token пользователя ─────────────────
@@ -487,6 +504,139 @@ app.patch('/transfers/:id', telegramAuth, requireDB, async (req, res) => {
     if (!r.rowCount) return res.status(404).json({ error: 'Запрос не найден' });
     res.json({ success: true, request: r.rows[0] });
   } catch(err) { res.status(500).json({ error: 'Ошибка обновления' }); }
+});
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SMS АВТОРИЗАЦИЯ — получение Authorizev3 через ЛК продавца WB
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /auth/request-sms
+ * Шаг 1: Запросить SMS-код на телефон продавца.
+ */
+app.post('/auth/request-sms', telegramAuth, requireDB, async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
+
+  try {
+    const result = await requestSmsCode(phone);
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    // Сохраняем requestToken для шага 2
+    await db.query(
+      `INSERT INTO sms_requests (telegram_id, phone, request_token, created_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (telegram_id) DO UPDATE
+         SET phone=$2, request_token=$3, created_at=NOW()`,
+      [req.telegramId, phone, result.requestToken]
+    );
+
+    res.json({ success: true, message: 'Код отправлен на ' + phone });
+  } catch (err) {
+    console.error('/auth/request-sms error:', err.message);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * POST /auth/verify-sms
+ * Шаг 2: Подтвердить SMS-код. Получает Authorizev3 сессионный токен.
+ * Сохраняет его как wb_session_token — воркер использует его для перемещений.
+ */
+app.post('/auth/verify-sms', telegramAuth, requireDB, async (req, res) => {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: 'Введите код из SMS' });
+
+  try {
+    const smsReq = await db.query(
+      'SELECT phone, request_token FROM sms_requests WHERE telegram_id=$1',
+      [req.telegramId]
+    );
+    if (!smsReq.rows.length) {
+      return res.status(400).json({ error: 'Сначала запросите SMS-код' });
+    }
+
+    const { phone, request_token } = smsReq.rows[0];
+    const result = await confirmSmsCode(phone, code, request_token);
+
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    // Сохраняем сессионный токен (Authorizev3) в users
+    await db.query(
+      `INSERT INTO users (telegram_id, wb_session_token, wb_session_updated, updated_at)
+       VALUES ($1, $2, NOW(), NOW())
+       ON CONFLICT (telegram_id) DO UPDATE
+         SET wb_session_token=$2, wb_session_updated=NOW(), updated_at=NOW()`,
+      [req.telegramId, result.sessionToken]
+    );
+
+    // Удаляем временный SMS-запрос
+    await db.query('DELETE FROM sms_requests WHERE telegram_id=$1', [req.telegramId]);
+
+    res.json({
+      success: true,
+      message: '✅ Авторизация в Wildberries успешна. Автобронь активирована!'
+    });
+  } catch (err) {
+    console.error('/auth/verify-sms error:', err.message);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+  }
+});
+
+/**
+ * POST /auth/set-session-token
+ * Сохраняет Authorizev3 сессионный токен из ЛК продавца.
+ * Этот токен нужен для вызовов внутреннего seller-supply API WB.
+ */
+app.post('/auth/set-session-token', telegramAuth, requireDB, async (req, res) => {
+  const { token } = req.body;
+  if (!token || token.trim().length < 50) {
+    return res.status(400).json({ error: 'Вставьте Authorizev3 токен (длинная строка из DevTools)' });
+  }
+  const clean = token.trim();
+  try {
+    // Проверяем токен реальным запросом к internal API
+    const testRes = await getWbTransferList(clean).catch(e => {
+      if (e.sessionExpired) throw Object.assign(new Error('Токен недействителен (401/403)'), { status: 401 });
+      return null; // другие ошибки (нет данных) — не страшны
+    });
+    await db.query(
+      `UPDATE users SET wb_session_token=$1, wb_session_updated=NOW(), updated_at=NOW() WHERE telegram_id=$2`,
+      [clean, req.telegramId]
+    );
+    res.json({ success: true, message: 'Сессионный токен сохранён. Автоброн активирован.' });
+  } catch (err) {
+    console.error('set-session-token error:', err.message);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /auth/session-status
+ * Статус сессионного токена (установлен / давность)
+ */
+app.get('/auth/session-status', telegramAuth, requireDB, async (req, res) => {
+  try {
+    const r = await db.query(
+      'SELECT wb_session_token, wb_session_updated FROM users WHERE telegram_id=$1',
+      [req.telegramId]
+    );
+    const row = r.rows[0];
+    if (!row || !row.wb_session_token) {
+      return res.json({ active: false });
+    }
+    const updatedAt = row.wb_session_updated;
+    const ageHours  = updatedAt ? Math.round((Date.now() - new Date(updatedAt)) / 3_600_000) : null;
+    res.json({ active: true, updated_at: updatedAt, age_hours: ageHours });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /**
@@ -876,79 +1026,77 @@ async function processRequest(req) {
 }
 
 /**
- * Выполняет перемещение через WB Marketplace API.
+ * Выполняет FBO-перемещение через внутренний seller-supply API WB.
+ * Использует Authorizev3 сессионный токен (имитация браузерной сессии).
  *
- * ⚠️  ВАЖНО: WB предоставляет перемещение остатков FBO (между своими складами)
- * через закрытое API «Перераспределение остатков» (тариф 0.5% от оборота).
- * Официальный публичный эндпоинт для FBO-перемещений на dev.wildberries.ru
- * не задокументирован — используется метод обновления остатков FBS как заглушка.
- *
- * Когда WB опубликует официальный эндпоинт (или вы найдёте его через
- * инспекцию сетевых запросов в ЛК WB) — замените тело этой функции.
- *
- * Текущая логика (FBS-остатки, склады продавца):
- * 1. Получаем список складов продавца
- * 2. Проверяем наличие товара на складе-источнике
- * 3. Уменьшаем на складе-источнике, увеличиваем на складе-назначении
+ * Стратегия:
+ * 1. Берём сессионный токен пользователя из БД
+ * 2. Вызываем AvailableLimits — проверяем есть ли квота на складе
+ * 3. Если квота есть — вызываем POST /transfer для создания перемещения
+ * 4. Если сессионный токен не задан — ошибка с инструкцией
  */
-async function executeRedistribution(token, req) {
-  const WB_API = 'https://marketplace-api.wildberries.ru';
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+async function executeRedistribution(wbToken, req) {
+  // Получаем сессионный токен пользователя
+  const sessionToken = await getUserSessionToken(req.user_id);
 
-  // 1. Получаем склады продавца
-  const whRes = await axios.get(`${WB_API}/api/v3/warehouses`, { headers, timeout: 10000 });
-  const warehouses = whRes.data || [];
-
-  const normalize = s => s.toLowerCase().replace(/[^а-яёa-z0-9]/gi, '');
-  const fromWh = warehouses.find(w => normalize(w.name).includes(normalize(req.from_warehouse)) || normalize(req.from_warehouse).includes(normalize(w.name)));
-  const toWh   = warehouses.find(w => normalize(w.name).includes(normalize(req.to_warehouse))   || normalize(req.to_warehouse).includes(normalize(w.name)));
-
-  if (!fromWh) {
-    const e = new Error(`Склад-источник «${req.from_warehouse}» не найден среди складов продавца`);
-    e.status = 400; throw e;
-  }
-  if (!toWh) {
-    const e = new Error(`Склад-назначение «${req.to_warehouse}» не найден среди складов продавца`);
-    e.status = 400; throw e;
+  if (!sessionToken) {
+    const e = new Error(
+      'Сессионный токен не задан. Откройте Mini App → Обновить токен WB → ' +
+      'вставьте Authorizev3 из DevTools (seller.wildberries.ru → F12 → Network)'
+    );
+    e.status = 400;
+    throw e;
   }
 
-  // 2. Текущие остатки на складе-источнике
-  const fromStRes = await axios.post(
-    `${WB_API}/api/v3/stocks/${fromWh.id}`,
-    { skus: [req.sku] }, { headers, timeout: 10000 }
-  );
-  const fromItem   = (fromStRes.data?.stocks || []).find(s => s.sku === req.sku);
-  const currentFrom = fromItem?.amount ?? 0;
-
-  if (currentFrom < req.amount) {
-    const e = new Error(`Недостаточно товара на складе ${req.from_warehouse}: есть ${currentFrom}, запрошено ${req.amount}`);
-    e.status = 400; throw e;
+  // Шаг 1: Получаем доступные лимиты для данного артикула
+  let limitsData;
+  try {
+    limitsData = await getTransferAvailableLimits(sessionToken, req.sku);
+  } catch (err) {
+    if (err.sessionExpired) {
+      const e = new Error('Сессионный токен истёк. Обновите Authorizev3 в разделе «Обновить токен WB»');
+      e.status = 400;
+      throw e;
+    }
+    throw err;
   }
 
-  // 3. Текущие остатки на складе-назначении
-  const toStRes = await axios.post(
-    `${WB_API}/api/v3/stocks/${toWh.id}`,
-    { skus: [req.sku] }, { headers, timeout: 10000 }
+  // Ищем склад-источник в списке доступных
+  const normalize = s => (s || '').toLowerCase().replace(/[^а-яёa-z0-9]/gi, '');
+  const fromWarehouse = (limitsData?.warehouses || limitsData || []).find(w =>
+    normalize(w.officeName || w.name || '').includes(normalize(req.from_warehouse)) ||
+    normalize(req.from_warehouse).includes(normalize(w.officeName || w.name || ''))
   );
-  const toItem    = (toStRes.data?.stocks || []).find(s => s.sku === req.sku);
-  const currentTo = toItem?.amount ?? 0;
 
-  // 4. Уменьшаем на источнике
-  const putFrom = await axios.put(
-    `${WB_API}/api/v3/stocks/${fromWh.id}`,
-    { stocks: [{ sku: req.sku, amount: currentFrom - req.amount }] },
-    { headers, timeout: 10000 }
-  );
-  if (putFrom.status === 409) {
-    const e = new Error('Квота операций исчерпана (409)'); e.status = 409; throw e;
+  if (!fromWarehouse) {
+    const e = new Error(`Склад «${req.from_warehouse}» недоступен для перемещения данного артикула`);
+    e.status = 409; // будет повтор
+    throw e;
   }
 
-  // 5. Увеличиваем на назначении
-  await axios.put(
-    `${WB_API}/api/v3/stocks/${toWh.id}`,
-    { stocks: [{ sku: req.sku, amount: currentTo + req.amount }] },
-    { headers, timeout: 10000 }
+  // Проверяем доступность квоты
+  const isAvailable = fromWarehouse.available !== false && fromWarehouse.limitAvailable !== false;
+  if (!isAvailable) {
+    const e = new Error(`Суточный лимит склада «${req.from_warehouse}» исчерпан`);
+    e.status = 409; // будет повтор когда квота откроется
+    throw e;
+  }
+
+  // Ищем склад-назначение
+  const toWarehouse = (limitsData?.allWarehouses || limitsData?.targets || []).find(w =>
+    normalize(w.officeName || w.name || '').includes(normalize(req.to_warehouse)) ||
+    normalize(req.to_warehouse).includes(normalize(w.officeName || w.name || ''))
   );
+
+  const toOfficeId = toWarehouse?.officeId || toWarehouse?.id || req.to_warehouse;
+
+  // Шаг 2: Создаём перемещение
+  await createWbTransfer(sessionToken, {
+    nmId:         Number(req.sku),
+    fromOfficeId: fromWarehouse.officeId || fromWarehouse.id,
+    toOfficeId:   toOfficeId,
+    amount:       Number(req.amount),
+  });
 }
 
 /**

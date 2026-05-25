@@ -648,6 +648,48 @@
   <button class="btn btn-accent" id="updateTokenBtn" onclick="updateToken()">
     Сохранить и проверить токен
   </button>
+
+  <!-- ── SMS-авторизация в ЛК WB (для автоброна) ── -->
+  <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:6px">🤖 Автобронь (вход через SMS)</div>
+    <div class="info-banner" style="margin-bottom:14px">
+      <span>ℹ️</span>
+      <span>Введите номер телефона от аккаунта продавца WB.<br>
+      Бот получит доступ к ЛК и будет автоматически бронировать квоты.</span>
+    </div>
+
+    <div id="sessionStatus" style="font-size:12px;margin-bottom:12px"></div>
+
+    <!-- Шаг A: телефон -->
+    <div id="smsPhoneStep">
+      <label class="field-label">Номер телефона продавца WB</label>
+      <input type="tel" id="smsPhoneInput" class="inp"
+        placeholder="+7 (999) 123-45-67"
+        inputmode="tel" style="margin-bottom:6px" />
+      <div id="smsPhoneMsg" class="msg"></div>
+      <button class="btn btn-surface" id="smsPhoneBtn" onclick="smsSendCode()" style="margin-top:8px">
+        📲 Получить SMS-код
+      </button>
+    </div>
+
+    <!-- Шаг B: код -->
+    <div id="smsCodeStep" style="display:none">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">
+        Код отправлен на <b id="smsPhoneDisplay" style="color:var(--text)"></b>
+      </p>
+      <label class="field-label">Код из SMS</label>
+      <input type="text" id="smsCodeInput" class="inp"
+        placeholder="123456" inputmode="numeric" maxlength="6"
+        style="letter-spacing:8px;font-size:20px;text-align:center;margin-bottom:6px" />
+      <div id="smsCodeMsg" class="msg"></div>
+      <button class="btn btn-accent" id="smsCodeBtn" onclick="smsVerifyCode()" style="margin-top:8px">
+        ✅ Подтвердить
+      </button>
+      <button class="btn btn-surface" onclick="smsReset()" style="margin-top:6px">
+        ← Изменить номер
+      </button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -1301,6 +1343,89 @@ async function updateToken() {
     showMsg('updateTokenMsg','error', e.message);
     btn.innerHTML = 'Сохранить и проверить токен';
     btn.disabled = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// SMS-АВТОРИЗАЦИЯ (Автобронь)
+// ═══════════════════════════════════════════════════════
+
+async function smsSendCode() {
+  const phone = document.getElementById('smsPhoneInput').value.trim();
+  const btn   = document.getElementById('smsPhoneBtn');
+  document.getElementById('smsPhoneMsg').style.display = 'none';
+
+  if (!phone) { showMsg('smsPhoneMsg','error','Введите номер телефона'); return; }
+
+  btn.innerHTML = '<span class="spinner"></span> Отправляем...';
+  btn.disabled = true;
+
+  try {
+    await api('POST', '/auth/request-sms', { phone });
+    document.getElementById('smsPhoneDisplay').textContent = phone;
+    document.getElementById('smsPhoneStep').style.display = 'none';
+    document.getElementById('smsCodeStep').style.display  = 'block';
+    setTimeout(() => document.getElementById('smsCodeInput')?.focus(), 100);
+  } catch(e) {
+    showMsg('smsPhoneMsg','error', e.message);
+    btn.innerHTML = '📲 Получить SMS-код';
+    btn.disabled = false;
+  }
+}
+
+async function smsVerifyCode() {
+  const code = document.getElementById('smsCodeInput').value.trim();
+  const btn  = document.getElementById('smsCodeBtn');
+  document.getElementById('smsCodeMsg').style.display = 'none';
+
+  if (!code || code.length < 4) { showMsg('smsCodeMsg','error','Введите код из SMS'); return; }
+
+  btn.innerHTML = '<span class="spinner"></span> Проверяем...';
+  btn.disabled = true;
+
+  try {
+    const res = await api('POST', '/auth/verify-sms', { code });
+    showMsg('smsCodeMsg','success', res.message || '✅ Авторизация успешна!');
+    loadSessionStatus();
+    updateSessionBanner(true);
+    setTimeout(() => go('main'), 1800);
+  } catch(e) {
+    showMsg('smsCodeMsg','error', e.message);
+    btn.innerHTML = '✅ Подтвердить';
+    btn.disabled = false;
+  }
+}
+
+function smsReset() {
+  document.getElementById('smsPhoneStep').style.display = 'block';
+  document.getElementById('smsCodeStep').style.display  = 'none';
+  document.getElementById('smsCodeInput').value = '';
+  document.getElementById('smsPhoneBtn').innerHTML = '📲 Получить SMS-код';
+  document.getElementById('smsPhoneBtn').disabled = false;
+}
+
+async function loadSessionStatus() {
+  const el = document.getElementById('sessionStatus');
+  if (!el) return;
+  try {
+    const r = await api('GET', '/auth/session-status');
+    if (r.active) {
+      const age = r.age_hours !== null ? `обновлён ${r.age_hours}ч назад` : '';
+      el.innerHTML = `<span style="color:var(--success)">✅ Автобронь активна ${age}</span>`;
+    } else {
+      el.innerHTML = '<span style="color:var(--warning)">⚠️ Войдите через SMS чтобы активировать автобронь</span>';
+    }
+  } catch {}
+}
+
+async function updateSessionBanner(active) {
+  const banner = document.getElementById('sessionBanner');
+  if (!banner) return;
+  if (active) {
+    banner.style.display = 'none';
+  } else {
+    banner.style.display = 'flex';
+    banner.innerHTML = '⚠️ <b style="margin-left:6px">Автобронь не активна.</b> <button onclick="go('updateToken')" style="margin-left:auto;background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700">Войти через SMS →</button>';
   }
 }
 
