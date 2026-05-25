@@ -278,27 +278,40 @@ app.post('/auth/set-token', telegramAuth, requireDB, async (req, res) => {
 app.get('/auth/status', telegramAuth, requireDB, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT wb_token, wb_token_info, updated_at FROM users WHERE telegram_id = $1',
+      `SELECT wb_token, wb_token_info, wb_session_token, wb_session_updated, updated_at
+       FROM users WHERE telegram_id = $1`,
       [req.telegramId]
     );
     const row = result.rows[0];
 
-    if (!row?.wb_token) {
+    const hasSession = !!(row?.wb_session_token);
+    const hasApiToken = !!(row?.wb_token);
+
+    // Авторизован если есть хоть что-то
+    if (!hasSession && !hasApiToken) {
       return res.json({ authorized: false });
     }
 
+    // Данные по API токену
     const tokenInfo = row.wb_token_info;
-    const expiresAt = tokenInfo?.exp
+    const apiTokenExpiry = tokenInfo?.exp
       ? new Date(tokenInfo.exp * 1000).toLocaleDateString('ru-RU')
       : null;
+    const apiTokenExpired = tokenInfo?.exp ? Date.now() / 1000 > tokenInfo.exp : false;
 
-    const isExpired = tokenInfo?.exp ? Date.now() / 1000 > tokenInfo.exp : false;
+    // Данные по сессионному токену
+    const sessionAgeHours = row.wb_session_updated
+      ? Math.round((Date.now() - new Date(row.wb_session_updated)) / 3_600_000)
+      : null;
 
     res.json({
-      authorized: !isExpired,
-      expires_at: expiresAt,
-      is_expired: isExpired,
-      connected_at: row.updated_at
+      authorized:         true,
+      has_session:        hasSession,
+      session_age_hours:  sessionAgeHours,
+      has_api_token:      hasApiToken,
+      api_token_expires:  apiTokenExpiry,
+      api_token_expired:  apiTokenExpired,
+      connected_at:       row.updated_at
     });
   } catch (err) {
     console.error('Ошибка проверки статуса:', err);

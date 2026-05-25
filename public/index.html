@@ -325,25 +325,46 @@
   <div class="auth-wrap">
     <div class="auth-logo">🛒</div>
     <div class="auth-title">WB Supply Helper</div>
-    <div class="auth-sub">Управление перераспределением остатков между складами Wildberries</div>
+    <div class="auth-sub">Автоматическое бронирование перемещений между складами Wildberries</div>
 
-    <div class="steps-box">
-      <div class="steps-box-title">Как получить API-токен</div>
-      <div class="step-item"><div class="step-num">1</div><span>Войдите в <b style="color:var(--text)">seller.wildberries.ru</b></span></div>
-      <div class="step-item"><div class="step-num">2</div><span>Профиль → Настройки → <b style="color:var(--text)">Доступ к API</b></span></div>
-      <div class="step-item"><div class="step-num">3</div><span>Нажмите <b style="color:var(--text)">«Создать токен»</b></span></div>
-      <div class="step-item"><div class="step-num">4</div><span>Выберите категории <b style="color:var(--text)">Marketplace</b> и <b style="color:var(--text)">Content</b></span></div>
-      <div class="step-item"><div class="step-num">5</div><span>Скопируйте токен ниже</span></div>
+    <!-- Шаг A: ввод телефона -->
+    <div id="authPhoneStep">
+      <div class="steps-box" style="margin-bottom:20px">
+        <div class="steps-box-title">Как войти</div>
+        <div class="step-item"><div class="step-num">1</div><span>Введите номер телефона от аккаунта <b style="color:var(--text)">продавца WB</b></span></div>
+        <div class="step-item"><div class="step-num">2</div><span>Получите SMS-код и введите его</span></div>
+        <div class="step-item"><div class="step-num">3</div><span>Готово — бот будет автоматически бронировать квоты</span></div>
+      </div>
+
+      <label class="field-label">Номер телефона продавца WB</label>
+      <input type="tel" id="authPhone" class="inp"
+        placeholder="+7 (999) 123-45-67"
+        inputmode="tel" style="margin-bottom:8px" />
+      <div id="authPhoneMsg" class="msg"></div>
+      <button class="btn btn-accent" id="authPhoneBtn" onclick="authSendSms()">
+        📲 Получить SMS-код
+      </button>
     </div>
 
-    <label class="field-label">API-токен Wildberries</label>
-    <input type="password" id="tokenInput" class="inp"
-      placeholder="eyJhbGciOiJFUzI1NiIsInR5cCI6Ikp..."
-      autocomplete="off" spellcheck="false" style="margin-bottom:10px" />
-    <div id="authMsg" class="msg"></div>
-    <button class="btn btn-accent" id="connectBtn" onclick="connectToken()" style="margin-top:12px">
-      Подключить
-    </button>
+    <!-- Шаг B: ввод SMS-кода -->
+    <div id="authCodeStep" style="display:none">
+      <p style="text-align:center;font-size:14px;color:var(--text2);margin-bottom:20px">
+        Код отправлен на<br>
+        <b id="authPhoneDisplay" style="color:var(--text);font-size:16px"></b>
+      </p>
+      <label class="field-label">Код из SMS</label>
+      <input type="text" id="authCode" class="inp"
+        placeholder="123456"
+        inputmode="numeric" maxlength="6"
+        style="letter-spacing:10px;font-size:28px;text-align:center;margin-bottom:8px" />
+      <div id="authCodeMsg" class="msg"></div>
+      <button class="btn btn-accent" id="authCodeBtn" onclick="authVerifySms()">
+        ✅ Подтвердить
+      </button>
+      <button class="btn btn-surface" onclick="authResetPhone()" style="margin-top:8px">
+        ← Изменить номер
+      </button>
+    </div>
   </div>
 </div>
 
@@ -762,12 +783,31 @@ function showNoTg() {
 
 function showMain(st) {
   go('main');
+
+  // Баннер статуса API-токена
   const banner = document.getElementById('tokenBanner');
-  if (st?.expires_at) {
-    banner.style.display = 'flex';
-    document.getElementById('tokenBannerText').innerHTML = st.is_expired
-      ? `<b style="color:var(--danger)">Токен истёк</b> ${st.expires_at}`
-      : `WB подключён · токен до <b>${st.expires_at}</b>`;
+  if (banner) {
+    if (st?.api_token_expired) {
+      banner.style.display = 'flex';
+      banner.innerHTML = '⚠️ API-токен WB истёк — обновите в разделе «Обновить токен WB»';
+    } else if (st?.has_api_token && st?.api_token_expires) {
+      banner.style.display = 'flex';
+      banner.innerHTML = 'WB API · токен до <b>' + st.api_token_expires + '</b>';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  // Баннер сессионного токена
+  const sessionBanner = document.getElementById('sessionBanner');
+  if (sessionBanner) {
+    if (st?.has_session) {
+      sessionBanner.style.display = 'none';
+    } else {
+      sessionBanner.style.display = 'flex';
+      sessionBanner.innerHTML = '⚠️ <b style="margin-left:6px">Сессия WB не активна — автобронь выключена.</b>'
+        + ' <button onclick="go('updateToken')" style="margin-left:auto;background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700">Войти →</button>';
+    }
   }
 }
 
@@ -775,20 +815,21 @@ function showMain(st) {
 // АВТОРИЗАЦИЯ
 // ═══════════════════════════════════════════════════════
 async function connectToken() {
-  const token = document.getElementById('tokenInput').value.trim();
-  const msg = document.getElementById('authMsg');
-  const btn = document.getElementById('connectBtn');
-  msg.className = 'msg'; msg.style.display = 'none';
-
-  if (!token) { showMsg('authMsg','error','Вставьте API-токен'); return; }
-
-  btn.innerHTML = '<span class="spinner"></span> Проверяем...'; btn.disabled = true;
+  // Используется в экране updateToken для смены API-токена
+  const input = document.getElementById('newTokenInput');
+  const token = input ? input.value.trim() : '';
+  const btn   = document.getElementById('updateTokenBtn');
+  if (!token) { showMsg('updateTokenMsg','error','Вставьте API-токен'); return; }
+  if (btn) { btn.innerHTML = '<span class="spinner"></span> Проверяем...'; btn.disabled = true; }
   try {
-    const res = await api('POST', '/auth/set-token', { token });
-    showMain({ expires_at: res.expires_at });
-  } catch (e) {
-    showMsg('authMsg','error', e.message);
-    btn.innerHTML = 'Подключить'; btn.disabled = false;
+    await api('POST', '/auth/set-token', { token });
+    if (input) input.value = '';
+    showMsg('updateTokenMsg','success','✅ API-токен обновлён');
+    if (btn) { btn.innerHTML = 'Сохранить и проверить токен'; btn.disabled = false; }
+    setTimeout(() => go('main'), 1500);
+  } catch (err) {
+    showMsg('updateTokenMsg','error', err.message);
+    if (btn) { btn.innerHTML = 'Сохранить и проверить токен'; btn.disabled = false; }
   }
 }
 
