@@ -855,10 +855,10 @@ function showMain(st) {
   // Баннер статуса API-токена
   const banner = document.getElementById('tokenBanner');
   if (banner) {
-    if (st?.api_token_expired) {
+    if (st && st.api_token_expired) {
       banner.style.display = 'flex';
-      banner.innerHTML = '⚠️ API-токен WB истёк — обновите в разделе «Обновить токен WB»';
-    } else if (st?.has_api_token && st?.api_token_expires) {
+      banner.textContent = '⚠️ API-токен WB истёк — обновите в разделе «Обновить токен WB»';
+    } else if (st && st.has_api_token && st.api_token_expires) {
       banner.style.display = 'flex';
       banner.innerHTML = 'WB API · токен до <b>' + st.api_token_expires + '</b>';
     } else {
@@ -869,14 +869,22 @@ function showMain(st) {
   // Баннер сессионного токена
   const sessionBanner = document.getElementById('sessionBanner');
   if (sessionBanner) {
-    if (st?.has_session) {
+    if (st && st.has_session) {
       sessionBanner.style.display = 'none';
+      sessionBanner.innerHTML = '';
     } else {
       sessionBanner.style.display = 'flex';
-      sessionBanner.innerHTML = '⚠️ <b style="margin-left:6px">Сессия WB не активна — автобронь выключена.</b>'
-        + ' <button onclick="go('updateToken')" style="margin-left:auto;background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700">Войти →</button>';
+      sessionBanner.innerHTML = '⚠️ <b style="margin-left:6px">Сессия WB не активна — автобронь выключена.</b>';
+      var sbBtn = document.createElement('button');
+      sbBtn.textContent = 'Войти →';
+      sbBtn.setAttribute('style', 'margin-left:auto;background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700');
+      sbBtn.onclick = function() { go('updateToken'); };
+      sessionBanner.appendChild(sbBtn);
     }
   }
+
+  // Проверяем сессионный статус
+  api('GET', '/auth/session-status').then(function(r) { updateSessionBanner(r.active); }).catch(function() {});
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1540,9 +1548,15 @@ async function updateSessionBanner(active) {
   if (!banner) return;
   if (active) {
     banner.style.display = 'none';
+    banner.innerHTML = '';
   } else {
     banner.style.display = 'flex';
-    banner.innerHTML = '⚠️ <b style="margin-left:6px">Автобронь не активна.</b> <button onclick="go('updateToken')" style="margin-left:auto;background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700">Войти через SMS →</button>';
+    banner.innerHTML = '⚠️ <b style="margin-left:6px">Автобронь не активна.</b>';
+    const btn = document.createElement('button');
+    btn.textContent = 'Войти →';
+    btn.setAttribute('style', 'margin-left:auto;background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700');
+    btn.onclick = function() { go('updateToken'); };
+    banner.appendChild(btn);
   }
 }
 
