@@ -751,6 +751,62 @@ function go(name) {
 }
 
 // ═══════════════════════════════════════════════════════
+// АВТОРИЗАЦИЯ — SMS (главный экран)
+// ═══════════════════════════════════════════════════════
+async function authSendSms() {
+  const phone = document.getElementById('authPhone').value.trim();
+  const btn   = document.getElementById('authPhoneBtn');
+  hideMsg('authPhoneMsg');
+
+  if (!phone) { showMsg('authPhoneMsg','error','Введите номер телефона'); return; }
+
+  btn.innerHTML = '<span class="spinner"></span> Отправляем...';
+  btn.disabled = true;
+
+  try {
+    await api('POST', '/auth/request-sms', { phone });
+    document.getElementById('authPhoneDisplay').textContent = phone;
+    document.getElementById('authPhoneStep').style.display = 'none';
+    document.getElementById('authCodeStep').style.display  = 'block';
+    setTimeout(() => document.getElementById('authCode')?.focus(), 100);
+  } catch(e) {
+    console.error('[SMS] authSendSms error:', e.message);
+    showMsg('authPhoneMsg','error', e.message || 'Ошибка отправки SMS');
+    btn.innerHTML = '📲 Получить SMS-код';
+    btn.disabled = false;
+  }
+}
+
+async function authVerifySms() {
+  const code = document.getElementById('authCode').value.trim();
+  const btn  = document.getElementById('authCodeBtn');
+  hideMsg('authCodeMsg');
+
+  if (!code || code.length < 4) { showMsg('authCodeMsg','error','Введите код из SMS'); return; }
+
+  btn.innerHTML = '<span class="spinner"></span> Проверяем...';
+  btn.disabled = true;
+
+  try {
+    await api('POST', '/auth/verify-sms', { code });
+    showMain({ has_session: true });
+  } catch(e) {
+    console.error('[SMS] authVerifySms error:', e.message);
+    showMsg('authCodeMsg','error', e.message || 'Неверный код');
+    btn.innerHTML = '✅ Подтвердить';
+    btn.disabled = false;
+  }
+}
+
+function authResetPhone() {
+  document.getElementById('authPhoneStep').style.display = 'block';
+  document.getElementById('authCodeStep').style.display  = 'none';
+  document.getElementById('authCode').value = '';
+  const btn = document.getElementById('authPhoneBtn');
+  if (btn) { btn.innerHTML = '📲 Получить SMS-код'; btn.disabled = false; }
+}
+
+// ═══════════════════════════════════════════════════════
 // СТАРТ
 // ═══════════════════════════════════════════════════════
 async function init() {
@@ -1320,8 +1376,16 @@ function loadQuotas() {
 // ═══════════════════════════════════════════════════════
 function showMsg(id, type, text) {
   const el = document.getElementById(id);
-  el.className = `msg msg-${type} show`;
+  if (!el) return;
+  el.style.display = '';          // убираем inline display:none
+  el.className = 'msg msg-' + type + ' show';
   el.textContent = text;
+}
+function hideMsg(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = 'none';
+  el.className = 'msg';
 }
 
 // Закрытие дропдаунов по тапу вне
@@ -1394,7 +1458,7 @@ async function updateToken() {
 async function smsSendCode() {
   const phone = document.getElementById('smsPhoneInput').value.trim();
   const btn   = document.getElementById('smsPhoneBtn');
-  document.getElementById('smsPhoneMsg').style.display = 'none';
+  hideMsg('smsPhoneMsg');
 
   if (!phone) { showMsg('smsPhoneMsg','error','Введите номер телефона'); return; }
 
@@ -1417,7 +1481,7 @@ async function smsSendCode() {
 async function smsVerifyCode() {
   const code = document.getElementById('smsCodeInput').value.trim();
   const btn  = document.getElementById('smsCodeBtn');
-  document.getElementById('smsCodeMsg').style.display = 'none';
+  hideMsg('smsCodeMsg');
 
   if (!code || code.length < 4) { showMsg('smsCodeMsg','error','Введите код из SMS'); return; }
 

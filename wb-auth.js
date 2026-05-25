@@ -5,7 +5,12 @@
 
 const axios = require('axios');
 
-const WB_PASSPORT = 'https://content-suppliers.wildberries.ru/passport/api/v2/auth';
+// Эндпоинты авторизации WB (пробуем по очереди если основной недоступен)
+const WB_AUTH_ENDPOINTS = [
+  'https://content-suppliers.wildberries.ru/passport/api/v2/auth',
+  'https://seller.wildberries.ru/passport/api/v2/auth',
+  'https://passport.wildberries.ru/api/v2/auth',
+];
 
 // Общие заголовки — имитируем браузер на seller.wildberries.ru
 const BROWSER_HEADERS = {
@@ -26,36 +31,49 @@ async function requestSmsCode(phone) {
   const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
   console.log(`[wb-auth] Запрос SMS на номер ${cleanPhone}`);
 
-  try {
-    const res = await axios.post(
-      `${WB_PASSPORT}/login_by_phone`,
-      {
-        phone:                           cleanPhone,
-        is_terms_and_conditions_accepted: true,
-      },
-      { headers: BROWSER_HEADERS, timeout: 15000 }
-    );
+  let lastError = null;
 
-    // Ответ содержит token — используется в шаге 2
-    const requestToken = res.data?.token || res.data?.requestId || null;
-    console.log(`[wb-auth] SMS запрошен. requestToken: ${requestToken ? requestToken.substring(0, 20) + '...' : 'НЕТ'}`);
+  // Перебираем эндпоинты — WB периодически меняет URL
+  for (const base of WB_AUTH_ENDPOINTS) {
+    try {
+      console.log(`[wb-auth] Trying: ${base}/login_by_phone`);
+      const res = await axios.post(
+        `${base}/login_by_phone`,
+        { phone: cleanPhone, is_terms_and_conditions_accepted: true },
+        { headers: BROWSER_HEADERS, timeout: 12000, validateStatus: s => s < 500 }
+      );
 
-    if (!requestToken) {
-      return { success: false, error: 'WB не вернул токен запроса. Попробуйте ещё раз.' };
+      const status = res.status;
+      console.log(`[wb-auth] ${base} → status ${status}, data:`, JSON.stringify(res.data)?.substring(0, 100));
+
+      if (status === 429) return { success: false, error: 'Слишком много попыток. Подождите несколько минут.' };
+      if (status === 400) return { success: false, error: res.data?.message || 'Неверный номер телефона' };
+      if (status === 404) return { success: false, error: 'Продавец с этим номером не найден на WB' };
+
+      if (status !== 200) {
+        lastError = `HTTP ${status}: ${JSON.stringify(res.data)}`;
+        continue; // пробуем следующий эндпоинт
+      }
+
+      const requestToken = res.data?.token || res.data?.requestId || res.data?.requestToken || null;
+      if (!requestToken) {
+        console.warn('[wb-auth] No token in response:', JSON.stringify(res.data));
+        lastError = 'WB не вернул токен запроса. Ответ: ' + JSON.stringify(res.data)?.substring(0, 80);
+        continue;
+      }
+
+      console.log(`[wb-auth] ✅ SMS запрошен через ${base}. Token: ${requestToken.substring(0, 20)}...`);
+      return { success: true, requestToken };
+
+    } catch (err) {
+      const status = err.response?.status;
+      lastError = `${base}: ${err.message} (${status || 'no response'})`;
+      console.warn(`[wb-auth] ${base} failed:`, lastError);
     }
-    return { success: true, requestToken };
-
-  } catch (err) {
-    const status = err.response?.status;
-    const detail = err.response?.data;
-    console.error('[wb-auth] requestSmsCode error:', status, JSON.stringify(detail));
-
-    if (status === 429) return { success: false, error: 'Слишком много попыток. Подождите несколько минут.' };
-    if (status === 400) return { success: false, error: detail?.message || 'Неверный номер телефона' };
-    if (status === 404) return { success: false, error: 'Продавец с этим номером не найден на WB' };
-
-    return { success: false, error: detail?.message || `Ошибка запроса SMS (${status || 'сеть'})` };
   }
+
+  console.error('[wb-auth] Все эндпоинты недоступны. lastError:', lastError);
+  return { success: false, error: lastError || 'Не удалось подключиться к WB. Проверьте номер телефона.' };
 }
 
 /**
@@ -71,8 +89,10 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
   console.log(`[wb-auth] Подтверждение кода ${cleanCode} для ${cleanPhone}`);
 
   try {
+    // используем тот же базовый URL что сработал (или первый по умолчанию)
+    const base = WB_AUTH_ENDPOINTS[0];
     const res = await axios.post(
-      `${WB_PASSPORT}/login`,
+      `${base}/login`,
       {
         token:   requestToken,
         options: { notify_code: cleanCode },
