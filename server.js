@@ -782,7 +782,7 @@ async function transferWorker() {
     `);
 
     if (!rows.length) return;
-    console.log(\`[worker] Цикл: \${rows.length} заявок в очереди\`);
+    console.log(`[worker] Цикл: ${rows.length} заявок в очереди`);
 
     // Обрабатываем по одной на пользователя за цикл
     const seen = new Set();
@@ -793,7 +793,7 @@ async function transferWorker() {
       // Проверяем rate-limit конкретного пользователя
       const rateUntil = userRateLimits[req.user_id];
       if (rateUntil && Date.now() < rateUntil) {
-        console.log(\`[worker] User \${req.user_id} rate-limited, пропускаем\`);
+        console.log(`[worker] User ${req.user_id} rate-limited, пропускаем`);
         continue;
       }
 
@@ -811,18 +811,18 @@ async function transferWorker() {
  * Обрабатывает одну заявку на перемещение.
  */
 async function processRequest(req) {
-  console.log(\`[worker] → #\${req.id} | \${req.from_warehouse} → \${req.to_warehouse} | SKU \${req.sku} × \${req.amount} | попытка \${req.retry_count + 1}\`);
+  console.log(`[worker] → #${req.id} | ${req.from_warehouse} → ${req.to_warehouse} | SKU ${req.sku} × ${req.amount} | попытка ${req.retry_count + 1}`);
 
   try {
     await executeRedistribution(req.wb_token, req);
 
     // ✅ Успех
     await db.query(
-      \`UPDATE transfer_requests SET status='done', error_message=NULL, updated_at=NOW() WHERE id=\$1\`,
+      `UPDATE transfer_requests SET status='done', error_message=NULL, updated_at=NOW() WHERE id=\$1`,
       [req.id]
     );
     await notifyUser(req.user_id, '✅ Заявка выполнена', req);
-    console.log(\`[worker] ✅ #\${req.id} выполнена\`);
+    console.log(`[worker] ✅ #${req.id} выполнена`);
 
   } catch (err) {
     const status   = err.status || 0;
@@ -832,7 +832,7 @@ async function processRequest(req) {
       // Rate limit — ждём X-Ratelimit-Retry секунд
       const waitSec = err.retryAfter || 60;
       userRateLimits[req.user_id] = Date.now() + waitSec * 1000;
-      console.log(\`[worker] ⏳ #\${req.id} rate limit, ждём \${waitSec}с\`);
+      console.log(`[worker] ⏳ #${req.id} rate limit, ждём ${waitSec}с`);
       // Не увеличиваем retry_count при rate limit
 
     } else if (status === 409) {
@@ -841,36 +841,36 @@ async function processRequest(req) {
       const newCount  = req.retry_count + 1;
       if (newCount >= MAX_RETRY_COUNT) {
         await db.query(
-          \`UPDATE transfer_requests SET status='failed', error_message=\$1, updated_at=NOW() WHERE id=\$2\`,
+          `UPDATE transfer_requests SET status='failed', error_message=\$1, updated_at=NOW() WHERE id=\$2`,
           ['Квота исчерпана 24+ часа подряд', req.id]
         );
         await notifyUser(req.user_id, '❌ Заявка отменена: квота не открывалась 24 часа', req);
       } else {
         await db.query(
-          \`UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4\`,
-          [nextRetry, newCount, \`409: квота исчерпана (попытка \${newCount})\`, req.id]
+          `UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4`,
+          [nextRetry, newCount, `409: квота исчерпана (попытка ${newCount})`, req.id]
         );
-        console.log(\`[worker] ⚠️  #\${req.id} квота исчерпана, повтор в \${nextRetry.toISOString()}\`);
+        console.log(`[worker] ⚠️  #${req.id} квота исчерпана, повтор в ${nextRetry.toISOString()}`);
       }
 
     } else if (status === 400) {
       // Ошибка данных — не повторяем, помечаем failed
       await db.query(
-        \`UPDATE transfer_requests SET status='failed', error_message=\$1, updated_at=NOW() WHERE id=\$2\`,
+        `UPDATE transfer_requests SET status='failed', error_message=\$1, updated_at=NOW() WHERE id=\$2`,
         [wbDetail, req.id]
       );
-      await notifyUser(req.user_id, \`❌ Ошибка заявки: \${wbDetail}\`, req);
-      console.log(\`[worker] ❌ #\${req.id} ошибка данных: \${wbDetail}\`);
+      await notifyUser(req.user_id, `❌ Ошибка заявки: ${wbDetail}`, req);
+      console.log(`[worker] ❌ #${req.id} ошибка данных: ${wbDetail}`);
 
     } else {
       // Временная ошибка — повторяем через минуту
       const nextRetry = new Date(Date.now() + RETRY_UNKNOWN_DELAY);
       const newCount  = req.retry_count + 1;
       await db.query(
-        \`UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4\`,
-        [nextRetry, newCount, \`\${status || 'err'}: \${wbDetail}\`, req.id]
+        `UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4`,
+        [nextRetry, newCount, `${status || 'err'}: ${wbDetail}`, req.id]
       );
-      console.error(\`[worker] ⚠️  #\${req.id} ошибка \${status}: \${wbDetail}, повтор через 60с\`);
+      console.error(`[worker] ⚠️  #${req.id} ошибка ${status}: ${wbDetail}, повтор через 60с`);
     }
   }
 }
@@ -893,10 +893,10 @@ async function processRequest(req) {
  */
 async function executeRedistribution(token, req) {
   const WB_API = 'https://marketplace-api.wildberries.ru';
-  const headers = { Authorization: \`Bearer \${token}\`, 'Content-Type': 'application/json' };
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   // 1. Получаем склады продавца
-  const whRes = await axios.get(\`\${WB_API}/api/v3/warehouses\`, { headers, timeout: 10000 });
+  const whRes = await axios.get(`${WB_API}/api/v3/warehouses`, { headers, timeout: 10000 });
   const warehouses = whRes.data || [];
 
   const normalize = s => s.toLowerCase().replace(/[^а-яёa-z0-9]/gi, '');
@@ -904,30 +904,30 @@ async function executeRedistribution(token, req) {
   const toWh   = warehouses.find(w => normalize(w.name).includes(normalize(req.to_warehouse))   || normalize(req.to_warehouse).includes(normalize(w.name)));
 
   if (!fromWh) {
-    const e = new Error(\`Склад-источник «\${req.from_warehouse}» не найден среди складов продавца\`);
+    const e = new Error(`Склад-источник «${req.from_warehouse}» не найден среди складов продавца`);
     e.status = 400; throw e;
   }
   if (!toWh) {
-    const e = new Error(\`Склад-назначение «\${req.to_warehouse}» не найден среди складов продавца\`);
+    const e = new Error(`Склад-назначение «${req.to_warehouse}» не найден среди складов продавца`);
     e.status = 400; throw e;
   }
 
   // 2. Текущие остатки на складе-источнике
   const fromStRes = await axios.post(
-    \`\${WB_API}/api/v3/stocks/\${fromWh.id}\`,
+    `${WB_API}/api/v3/stocks/${fromWh.id}`,
     { skus: [req.sku] }, { headers, timeout: 10000 }
   );
   const fromItem   = (fromStRes.data?.stocks || []).find(s => s.sku === req.sku);
   const currentFrom = fromItem?.amount ?? 0;
 
   if (currentFrom < req.amount) {
-    const e = new Error(\`Недостаточно товара на складе \${req.from_warehouse}: есть \${currentFrom}, запрошено \${req.amount}\`);
+    const e = new Error(`Недостаточно товара на складе ${req.from_warehouse}: есть ${currentFrom}, запрошено ${req.amount}`);
     e.status = 400; throw e;
   }
 
   // 3. Текущие остатки на складе-назначении
   const toStRes = await axios.post(
-    \`\${WB_API}/api/v3/stocks/\${toWh.id}\`,
+    `${WB_API}/api/v3/stocks/${toWh.id}`,
     { skus: [req.sku] }, { headers, timeout: 10000 }
   );
   const toItem    = (toStRes.data?.stocks || []).find(s => s.sku === req.sku);
@@ -935,7 +935,7 @@ async function executeRedistribution(token, req) {
 
   // 4. Уменьшаем на источнике
   const putFrom = await axios.put(
-    \`\${WB_API}/api/v3/stocks/\${fromWh.id}\`,
+    `${WB_API}/api/v3/stocks/${fromWh.id}`,
     { stocks: [{ sku: req.sku, amount: currentFrom - req.amount }] },
     { headers, timeout: 10000 }
   );
@@ -945,7 +945,7 @@ async function executeRedistribution(token, req) {
 
   // 5. Увеличиваем на назначении
   await axios.put(
-    \`\${WB_API}/api/v3/stocks/\${toWh.id}\`,
+    `${WB_API}/api/v3/stocks/${toWh.id}`,
     { stocks: [{ sku: req.sku, amount: currentTo + req.amount }] },
     { headers, timeout: 10000 }
   );
@@ -958,11 +958,11 @@ async function notifyUser(telegramId, text, req) {
   if (!BOT_TOKEN) return;
   try {
     const detail = req
-      ? \`\n✅ Поставщик: Текущий аккаунт WB\n✅ Склад: \${req.from_warehouse} ➡️ \${req.to_warehouse}\n✅ Артикул: \${req.sku}\n✅ Единиц товара: \${req.amount}\`
+      ? `\n✅ Поставщик: Текущий аккаунт WB\n✅ Склад: ${req.from_warehouse} ➡️ ${req.to_warehouse}\n✅ Артикул: ${req.sku}\n✅ Единиц товара: ${req.amount}`
       : '';
     await axios.post(
-      \`https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\`,
-      { chat_id: telegramId, text: \`‼️ Заявка на перемещение выполнена ‼️\n\${detail}\`, parse_mode: 'HTML' },
+      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+      { chat_id: telegramId, text: `‼️ Заявка на перемещение выполнена ‼️\n${detail}`, parse_mode: 'HTML' },
       { timeout: 8000 }
     );
   } catch (e) {
@@ -972,7 +972,7 @@ async function notifyUser(telegramId, text, req) {
 
 // ─── Запуск воркера ───────────────────────────────────────────────────────────
 function startWorker() {
-  console.log(\`🔄 Фоновый воркер запущен (интервал \${WORKER_INTERVAL / 1000}с)\`);
+  console.log(`🔄 Фоновый воркер запущен (интервал ${WORKER_INTERVAL / 1000}с)`);
   setInterval(transferWorker, WORKER_INTERVAL);
   // Первый запуск через 5 сек после старта (дать время подключиться к БД)
   setTimeout(transferWorker, 5000);
