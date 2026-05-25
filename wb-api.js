@@ -179,22 +179,40 @@ function extractSkusFromCards(cards) {
  * POST /content/v2/get/cards/list с фильтром по nmID
  */
 async function getArticleByNmId(token, nmId) {
-  try {
-    const response = await apiRequest('POST', WB_CONTENT_API, '/content/v2/get/cards/list', token, {
-      settings: {
-        cursor: { limit: 10 },
-        filter: { nmIDs: [parseInt(nmId)], withPhoto: -1 }
+  const target = parseInt(nmId);
+
+  // Перебираем варианты фильтров WB Content API:
+  // 1. nmIDs — официальный параметр для фильтрации по nmID (если поддерживается)
+  // 2. textSearch — поиск по тексту, ищет по артикулу среди карточек продавца
+  const filters = [
+    { nmIDs: [target], withPhoto: -1 },
+    { textSearch: String(nmId), withPhoto: -1 },
+  ];
+
+  for (const filter of filters) {
+    try {
+      const response = await apiRequest('POST', WB_CONTENT_API, '/content/v2/get/cards/list', token, {
+        settings: { cursor: { limit: 100 }, filter }
+      });
+
+      const cards = response?.cards || [];
+      console.log(`[article search] filter=${JSON.stringify(filter)} cards=${cards.length}`);
+
+      // ВАЖНО: проверяем точное совпадение nmID, не берём первую попавшуюся карточку
+      const card = cards.find(c => c.nmID === target);
+      if (card) {
+        const skus = extractSkusFromCards([card]);
+        const name = card.title || card.subjectName || `Артикул ${nmId}`;
+        console.log(`[article search] found: nmID=${card.nmID} name="${name}" skus=${skus.length}`);
+        return { nmId: target, name, skus };
       }
-    });
-    const card = response?.cards?.[0];
-    if (!card) return null;
-    const skus = extractSkusFromCards([card]);
-    const name = card.title || card.subjectName || `Артикул ${nmId}`;
-    return { nmId: parseInt(nmId), name, skus };
-  } catch(err) {
-    console.error('getArticleByNmId error:', err.message);
-    return null;
+    } catch(err) {
+      console.error(`[article search] filter attempt failed:`, err.message);
+    }
   }
+
+  console.warn(`[article search] nmId ${nmId} not found in seller catalog`);
+  return null;
 }
 
 /**
