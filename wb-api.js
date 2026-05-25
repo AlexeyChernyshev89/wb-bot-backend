@@ -173,12 +173,60 @@ function extractSkusFromCards(cards) {
   return [...new Set(skus)]; // дедупликация
 }
 
+
+/**
+ * Получить название и баркоды товара по nmId (артикул WB).
+ * POST /content/v2/get/cards/list с фильтром по nmID
+ */
+async function getArticleByNmId(token, nmId) {
+  try {
+    const response = await apiRequest('POST', WB_CONTENT_API, '/content/v2/get/cards/list', token, {
+      settings: {
+        cursor: { limit: 10 },
+        filter: { nmIDs: [parseInt(nmId)], withPhoto: -1 }
+      }
+    });
+    const card = response?.cards?.[0];
+    if (!card) return null;
+    const skus = extractSkusFromCards([card]);
+    const name = card.title || card.subjectName || `Артикул ${nmId}`;
+    return { nmId: parseInt(nmId), name, skus };
+  } catch(err) {
+    console.error('getArticleByNmId error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Получить склады с ненулевыми остатками для данного артикула.
+ * Возвращает: [{ id, name, amount }]
+ */
+async function getArticleStocks(token, nmId) {
+  const article = await getArticleByNmId(token, nmId);
+  if (!article || !article.skus.length) return { article: null, warehouses: [] };
+
+  const warehouses = await getWarehouses(token);
+  const result = [];
+
+  // Проверяем склады параллельно (батчами по 5 чтобы не превысить rate limit)
+  const batchSize = 5;
+  for (let i = 0; i < warehouses.length; i += batchSize) {
+    const batch = warehouses.slice(i, i + batchSize);
+    await Promise.all(batch.map(async wh => {
+      try {
+        const stocks = await getStocks(token, wh.id, article.skus);
+        const total = (stocks.stocks || []).reduce((s, x) => s + (x.amount || 0), 0);
+        if (total > 0) result.push({ id: wh.id, name: wh.name, amount: total });
+      } catch {}
+    }));
+  }
+
+  result.sort((a, b) => b.amount - a.amount);
+  return { article, warehouses: result };
+}
+
 module.exports = {
-  getWarehouses,
-  getStocks,
-  updateStocks,
-  deleteStocks,
-  getCardsList,
-  getAllCards,
-  extractSkusFromCards
+  getWarehouses, getStocks, updateStocks, deleteStocks,
+  getCardsList, getAllCards, extractSkusFromCards,
+  getArticleByNmId, getArticleStocks
 };

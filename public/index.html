@@ -7,1012 +7,1151 @@
   <title>WB Supply Helper</title>
   <style>
     :root {
-      --bg:        var(--tg-theme-bg-color, #ffffff);
-      --text:      var(--tg-theme-text-color, #1a1a1a);
-      --hint:      var(--tg-theme-hint-color, #8e8e93);
-      --link:      var(--tg-theme-link-color, #007aff);
-      --btn:       var(--tg-theme-button-color, #007aff);
-      --btn-text:  var(--tg-theme-button-text-color, #ffffff);
-      --secondary: var(--tg-theme-secondary-bg-color, #f2f2f7);
-      --border:    #e5e5ea;
-      --danger:    #ff3b30;
-      --success:   #34c759;
-      --warning:   #ff9500;
-      --radius:    12px;
+      --bg:       #12131e;
+      --surf:     #1c1d2e;
+      --surf2:    #252638;
+      --surf3:    #2e2f48;
+      --border:   #333450;
+      --accent:   #00d4e0;
+      --accent2:  #00a8b8;
+      --accent-bg:#0a2e32;
+      --text:     #f0f1ff;
+      --text2:    #8b8fa8;
+      --danger:   #ff4757;
+      --success:  #2ed573;
+      --warning:  #ffa502;
+      --pending:  #a855f7;
+      --radius:   12px;
     }
-
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
       background: var(--bg);
       color: var(--text);
-      padding: 16px 16px 32px;
       min-height: 100vh;
-      font-size: 15px;
+      font-size: 14px;
     }
 
-    /* ── Секции ─────────────────────────────────────────── */
-    .section { display: none; }
-    .section.active { display: block; }
+    /* ── Скрины ──────────────────────────────── */
+    .screen { display: none; padding: 16px 14px 32px; }
+    .screen.active { display: block; }
 
-    /* ── Заголовки ──────────────────────────────────────── */
-    h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
-    h3 { font-size: 17px; font-weight: 600; margin-bottom: 14px; }
-
-    /* ── Описание ───────────────────────────────────────── */
-    .hint { font-size: 13px; color: var(--hint); line-height: 1.5; margin-bottom: 14px; }
-
-    /* ── Плитки баланса ─────────────────────────────────── */
-    .balance-row { display: flex; gap: 10px; margin-bottom: 18px; }
-    .balance-card {
-      flex: 1;
-      background: var(--secondary);
-      border-radius: var(--radius);
-      padding: 14px 12px;
-      text-align: center;
+    /* ── Шапка экрана ────────────────────────── */
+    .screen-header {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 18px;
     }
-    .balance-card .val {
-      font-size: 28px;
-      font-weight: 700;
-      line-height: 1;
-      margin-bottom: 5px;
-    }
-    .balance-card .lbl {
-      font-size: 11px;
-      color: var(--hint);
-      line-height: 1.3;
-    }
-
-    /* ── Меню ───────────────────────────────────────────── */
-    .menu-list {
-      list-style: none;
-      border-radius: var(--radius);
-      overflow: hidden;
-      border: 1px solid var(--border);
-      background: var(--bg);
-    }
-    .menu-list li { border-bottom: 1px solid var(--border); }
-    .menu-list li:last-child { border-bottom: none; }
-    .menu-list button {
-      display: flex;
-      align-items: center;
-      width: 100%;
-      padding: 14px 16px;
-      background: none;
-      border: none;
-      font-size: 16px;
-      color: var(--text);
-      cursor: pointer;
-      gap: 13px;
-      text-align: left;
-    }
-    .menu-list button:active { background: var(--secondary); }
-    .menu-list .ico { font-size: 19px; width: 26px; text-align: center; flex-shrink: 0; }
-    .menu-list .chevron { margin-left: auto; color: var(--hint); font-size: 18px; line-height: 1; }
-
-    /* ── Кнопка «Назад» ─────────────────────────────────── */
     .back-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      background: none;
-      border: none;
-      color: var(--link);
-      font-size: 15px;
-      cursor: pointer;
-      padding: 0;
-      margin-bottom: 16px;
+      width: 32px; height: 32px;
+      background: var(--surf2); border: none; border-radius: 50%;
+      color: var(--accent); font-size: 18px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
     }
+    .screen-title { font-size: 17px; font-weight: 700; }
 
-    /* ── Inputs / selects ───────────────────────────────── */
-    label.field-label {
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--hint);
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-      margin: 16px 0 4px;
+    /* ── Баланс-карточки ─────────────────────── */
+    .balance-row { display: flex; gap: 10px; margin-bottom: 16px; }
+    .bal-card {
+      flex: 1; background: var(--surf); border-radius: var(--radius);
+      padding: 14px 12px; border: 1px solid var(--border);
     }
-    .field-wrap { position: relative; }
-    input, select {
-      display: block;
-      width: 100%;
-      padding: 11px 13px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      font-size: 15px;
-      color: var(--text);
-      background: var(--bg);
-      outline: none;
-      -webkit-appearance: none;
-      appearance: none;
-    }
-    input:focus, select:focus { border-color: var(--btn); }
-    input::placeholder { color: var(--hint); }
-    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
-    select { background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 7L11 1' stroke='%238E8E93' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 13px center; padding-right: 32px; }
+    .bal-val { font-size: 32px; font-weight: 800; color: var(--accent); line-height: 1; margin-bottom: 4px; }
+    .bal-lbl { font-size: 11px; color: var(--text2); line-height: 1.3; }
 
-    /* крестик очистки поля */
-    .clear-btn {
-      position: absolute;
-      right: 10px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: var(--hint);
-      border: none;
-      border-radius: 50%;
-      width: 18px;
-      height: 18px;
-      color: var(--bg);
-      font-size: 11px;
-      line-height: 18px;
-      text-align: center;
-      cursor: pointer;
-      display: none;
-      padding: 0;
+    /* ── Главное меню ────────────────────────── */
+    .menu-block {
+      background: var(--surf); border-radius: var(--radius);
+      border: 1px solid var(--border); overflow: hidden;
     }
+    .menu-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 16px; border: none; background: none;
+      color: var(--text); font-size: 15px; cursor: pointer;
+      width: 100%; text-align: left;
+      border-bottom: 1px solid var(--border);
+      transition: background .15s;
+    }
+    .menu-item:last-child { border-bottom: none; }
+    .menu-item:active { background: var(--surf2); }
+    .menu-icon { font-size: 17px; width: 22px; text-align: center; flex-shrink: 0; }
+    .menu-chevron { margin-left: auto; color: var(--text2); font-size: 16px; }
 
-    /* ── Кнопки ─────────────────────────────────────────── */
+    /* ── Кнопки ──────────────────────────────── */
     .btn {
-      display: block;
-      width: 100%;
-      padding: 13px;
-      margin-top: 14px;
-      border: none;
-      border-radius: 10px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
+      display: block; width: 100%; padding: 13px;
+      border: none; border-radius: 10px; font-size: 15px;
+      font-weight: 700; cursor: pointer; text-align: center;
       transition: opacity .15s;
     }
     .btn:active { opacity: .75; }
-    .btn-primary { background: var(--btn); color: var(--btn-text); }
-    .btn-secondary { background: var(--secondary); color: var(--text); }
+    .btn-accent { background: var(--accent); color: #000; }
+    .btn-surface { background: var(--surf2); color: var(--text); border: 1px solid var(--border); }
     .btn-danger { background: var(--danger); color: #fff; }
     .btn-sm {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: auto;
-      padding: 6px 12px;
-      font-size: 13px;
-      font-weight: 600;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: auto; padding: 7px 14px; font-size: 13px; font-weight: 700;
+      border-radius: 8px; border: none; cursor: pointer;
     }
     .btn-sm:active { opacity: .75; }
-    .btn-sm.primary { background: var(--btn); color: var(--btn-text); }
-    .btn-sm.danger  { background: var(--danger); color: #fff; }
+    .btn-sm-accent { background: var(--accent); color: #000; }
+    .btn-sm-surface { background: var(--surf2); color: var(--text); border: 1px solid var(--border); }
 
-    /* ── Сообщения ──────────────────────────────────────── */
-    .msg { font-size: 13px; margin-top: 8px; line-height: 1.4; }
-    .msg-error   { color: var(--danger); }
-    .msg-success { color: var(--success); }
-    .msg-warn    { color: var(--warning); }
-
-    /* ── Инфо-баннер ────────────────────────────────────── */
-    .info-banner {
-      background: var(--secondary);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-      font-size: 13px;
-      color: var(--hint);
-      margin-bottom: 16px;
+    /* ── Табы ────────────────────────────────── */
+    .tabs { display: flex; background: var(--surf2); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
+    .tab {
+      flex: 1; padding: 8px; border: none; background: none;
+      color: var(--text2); font-size: 14px; font-weight: 600;
+      cursor: pointer; border-radius: 8px; transition: all .2s;
     }
-    .info-banner b { color: var(--text); }
-
-    /* ── Таблица запросов ───────────────────────────────── */
-    .req-list { margin-top: 12px; }
-    .req-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--border);
+    .tab.active { background: var(--surf3); color: var(--accent); }
+    .tab-count {
+      display: inline-block; background: var(--accent); color: #000;
+      border-radius: 10px; padding: 1px 7px; font-size: 11px;
+      font-weight: 800; margin-right: 4px;
     }
-    .req-row:last-child { border-bottom: none; }
-    .req-body { flex: 1; min-width: 0; }
-    .req-title { font-size: 14px; font-weight: 600; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .req-sub { font-size: 12px; color: var(--hint); }
-    .req-count { font-size: 18px; font-weight: 700; flex-shrink: 0; }
+    .tab.active .tab-count { background: var(--accent); }
 
-    /* ── Статус-бейджи ──────────────────────────────────── */
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 600;
+    /* ── Строки перемещений ──────────────────── */
+    .transfer-row {
+      background: var(--surf); border-radius: var(--radius);
+      border: 1px solid var(--border); padding: 11px 12px;
+      margin-bottom: 8px;
     }
-    .badge-pending { background: #fff3cd; color: #856404; }
-    .badge-done    { background: #d1fae5; color: #065f46; }
-    .badge-failed  { background: #fee2e2; color: #991b1b; }
-
-    /* ── Пустое состояние ───────────────────────────────── */
-    .empty {
-      text-align: center;
-      padding: 48px 20px;
-      color: var(--hint);
+    .tr-header { display: flex; justify-content: space-between; margin-bottom: 7px; }
+    .tr-supplier { font-size: 13px; font-weight: 600; color: var(--text); }
+    .tr-date { font-size: 11px; color: var(--text2); }
+    .route-pill {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--accent-bg); border: 1px solid var(--accent2);
+      border-radius: 20px; padding: 5px 12px; margin-bottom: 8px;
+      font-size: 13px; font-weight: 600; color: var(--accent);
     }
-    .empty .ico { font-size: 44px; margin-bottom: 12px; }
-    .empty p { font-size: 15px; margin-bottom: 16px; }
+    .route-pill .arrow { color: var(--text2); font-size: 12px; }
+    .tr-footer { display: flex; align-items: center; gap: 8px; }
+    .tr-meta { font-size: 12px; color: var(--text2); flex: 1; }
+    .tr-meta b { color: var(--text); }
+    .tr-actions { display: flex; gap: 6px; }
+    .icon-btn {
+      width: 30px; height: 30px; border-radius: 8px; border: none;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; cursor: pointer;
+    }
+    .icon-btn-edit { background: var(--surf3); color: var(--accent); }
+    .icon-btn-del  { background: rgba(255,71,87,.15); color: var(--danger); }
 
-    /* ── Тарифы оплаты ──────────────────────────────────── */
-    .tariff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
-    .tariff-card {
-      border: 2px solid var(--border);
-      border-radius: 10px;
-      padding: 13px 10px;
-      cursor: pointer;
-      text-align: center;
+    /* ── Форма создания ──────────────────────── */
+    .form-card {
+      background: var(--surf); border-radius: var(--radius);
+      border: 1px solid var(--border); padding: 16px; margin-bottom: 10px;
+    }
+    .form-title { font-size: 18px; font-weight: 800; text-align: center; margin-bottom: 20px; }
+    .field-group { margin-bottom: 10px; }
+    .search-field {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surf2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 12px;
+      transition: border-color .2s;
+    }
+    .search-field.open { border-color: var(--accent); border-radius: 10px 10px 0 0; }
+    .search-field .ico { color: var(--text2); font-size: 14px; flex-shrink: 0; }
+    .search-field input {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 14px;
+    }
+    .search-field input::placeholder { color: var(--text2); }
+    .search-field .clear { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 16px; padding: 0; }
+    .search-field .chevron { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 12px; padding: 0; }
+    .dropdown {
+      background: var(--surf2); border: 1px solid var(--accent);
+      border-top: none; border-radius: 0 0 10px 10px;
+      max-height: 200px; overflow-y: auto;
+    }
+    .dropdown-item {
+      padding: 11px 14px; font-size: 14px; cursor: pointer;
+      border-bottom: 1px solid var(--border); color: var(--text);
+    }
+    .dropdown-item:last-child { border-bottom: none; }
+    .dropdown-item:active { background: var(--surf3); }
+    .qty-field {
+      background: var(--surf2); border: 1px solid var(--accent);
+      border-radius: 10px; padding: 10px 12px;
+      font-size: 14px; color: var(--text); width: 100%;
+      outline: none;
+    }
+    .qty-label { font-size: 12px; color: var(--text2); margin-bottom: 6px; font-weight: 600; }
+
+    /* ── Инпуты ──────────────────────────────── */
+    .inp {
+      display: block; width: 100%; padding: 11px 12px;
+      background: var(--surf2); border: 1px solid var(--border);
+      border-radius: 10px; color: var(--text); font-size: 14px;
+      outline: none; transition: border-color .2s;
+    }
+    .inp:focus { border-color: var(--accent); }
+    .inp::placeholder { color: var(--text2); }
+
+    /* ── Тарифы ──────────────────────────────── */
+    .tariff-list { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+    .tariff-row {
+      display: flex; align-items: center; gap: 12px;
+      background: var(--surf2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; cursor: pointer;
       transition: border-color .15s, background .15s;
     }
-    .tariff-card.sel {
-      border-color: var(--btn);
-      background: color-mix(in srgb, var(--btn) 8%, transparent);
+    .tariff-row.sel { border-color: var(--accent); background: var(--accent-bg); }
+    .tariff-dot {
+      width: 16px; height: 16px; border-radius: 50%;
+      border: 2px solid var(--border); flex-shrink: 0;
+      transition: all .15s;
     }
-    .tariff-card .t-units { font-size: 17px; font-weight: 700; }
-    .tariff-card .t-price { font-size: 13px; color: var(--hint); margin-top: 2px; }
+    .tariff-row.sel .tariff-dot { border-color: var(--accent); background: var(--accent); }
+    .tariff-name { flex: 1; font-size: 14px; }
+    .tariff-price { font-size: 14px; font-weight: 700; color: var(--accent); }
 
-    /* ── История платежей ───────────────────────────────── */
+    /* ── История платежей ────────────────────── */
     .pay-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 14px 0; border-bottom: 1px solid var(--border);
     }
-    .pay-row:last-child { border-bottom: none; }
-    .pay-meta { font-size: 13px; color: var(--hint); margin-top: 3px; }
-    .pay-amount { font-size: 17px; font-weight: 700; }
+    .pay-dot-col { display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
+    .pay-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--surf3); border: 2px solid var(--border); flex-shrink: 0; }
+    .pay-dot.paid { border-color: var(--success); background: var(--success); }
+    .pay-dot.pending { border-color: var(--pending); background: var(--pending); }
+    .pay-line { width: 2px; flex: 1; background: var(--border); margin-top: 4px; min-height: 20px; }
+    .pay-body { flex: 1; }
+    .pay-datetime { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+    .pay-amount { font-size: 20px; font-weight: 800; margin-bottom: 2px; }
+    .pay-units { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+    .badge {
+      display: inline-block; padding: 3px 10px; border-radius: 20px;
+      font-size: 11px; font-weight: 700;
+    }
+    .badge-paid    { background: rgba(46,213,115,.15); color: var(--success); }
+    .badge-pending { background: rgba(168,85,247,.15); color: var(--pending); }
 
-    /* ── Квоты ──────────────────────────────────────────── */
+    /* ── Квоты ───────────────────────────────── */
     .quota-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 11px 0;
-      border-bottom: 1px solid var(--border);
-      font-size: 14px;
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
     }
-    .quota-row:last-child { border-bottom: none; }
-    .quota-row .q-name { flex: 1; }
-    .quota-row .q-val { font-weight: 700; text-align: right; }
+    .quota-chart { flex-shrink: 0; }
+    .quota-info { flex: 1; }
+    .quota-name { font-size: 14px; font-weight: 700; margin: 3px 0; }
+    .quota-in  { font-size: 12px; color: #4da6ff; }
+    .quota-out { font-size: 12px; color: var(--success); }
 
-    /* ── Инструкция токена ──────────────────────────────── */
-    .token-steps {
-      background: var(--secondary);
-      border-radius: var(--radius);
-      padding: 14px 16px;
-      margin-bottom: 16px;
-    }
-    .token-steps p { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
-    .token-steps ol { padding-left: 18px; }
-    .token-steps li { font-size: 13px; color: var(--hint); line-height: 1.9; }
+    /* ── Сообщения ───────────────────────────── */
+    .msg { font-size: 13px; margin-top: 8px; padding: 8px 12px; border-radius: 8px; display: none; }
+    .msg.show { display: block; }
+    .msg-error   { background: rgba(255,71,87,.1); color: var(--danger); border: 1px solid rgba(255,71,87,.3); }
+    .msg-success { background: rgba(46,213,115,.1); color: var(--success); border: 1px solid rgba(46,213,115,.3); }
+    .msg-warn    { background: rgba(255,165,2,.1); color: var(--warning); border: 1px solid rgba(255,165,2,.3); }
 
-    /* ── Спиннер ────────────────────────────────────────── */
+    /* ── Спиннер ─────────────────────────────── */
     .spinner {
-      display: inline-block;
-      width: 16px; height: 16px;
-      border: 2px solid var(--border);
-      border-top-color: var(--btn);
-      border-radius: 50%;
-      animation: spin .7s linear infinite;
-      vertical-align: middle;
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Раздел поставщика ──────────────────────────────── */
-    .step-block { display: none; margin-top: 4px; }
-    .step-block.visible { display: block; }
+    /* ── Пустое состояние ────────────────────── */
+    .empty { text-align: center; padding: 48px 20px; color: var(--text2); }
+    .empty-ico { font-size: 44px; margin-bottom: 12px; }
+
+    /* ── Шаг-блоки формы ─────────────────────── */
+    .step { display: none; }
+    .step.on { display: block; }
+
+    /* ── Информационный баннер ───────────────── */
+    .info-banner {
+      background: var(--surf2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 11px 13px; font-size: 13px;
+      color: var(--text2); margin-bottom: 14px; display: flex; gap: 8px;
+    }
+    .info-banner b { color: var(--text); }
+
+    /* ── Авторизация ─────────────────────────── */
+    .auth-wrap { padding: 32px 20px; }
+    .auth-logo { text-align: center; font-size: 52px; margin-bottom: 16px; }
+    .auth-title { text-align: center; font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+    .auth-sub { text-align: center; font-size: 14px; color: var(--text2); margin-bottom: 28px; }
+    .steps-box {
+      background: var(--surf); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px; margin-bottom: 20px;
+    }
+    .steps-box-title { font-size: 13px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+    .step-item { display: flex; gap: 10px; padding: 6px 0; font-size: 13px; color: var(--text2); line-height: 1.4; }
+    .step-num { width: 20px; height: 20px; border-radius: 50%; background: var(--surf3); color: var(--accent); font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+    .field-label { font-size: 12px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; display: block; }
+
+    /* ── Способ оплаты ───────────────────────── */
+    .pay-methods { display: flex; gap: 8px; margin-bottom: 14px; }
+    .pay-method {
+      flex: 1; padding: 10px; background: var(--surf2); border: 2px solid var(--border);
+      border-radius: 10px; cursor: pointer; text-align: center;
+      font-size: 14px; font-weight: 600; color: var(--text2); transition: all .15s;
+    }
+    .pay-method.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+    .pay-info-box {
+      background: var(--surf2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 12px; font-size: 12px;
+      color: var(--text2); margin-bottom: 14px; line-height: 1.5;
+    }
+
+    /* ── Поле email с карандашом ─────────────── */
+    .email-field-wrap {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surf2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 12px; margin-bottom: 16px;
+    }
+    .email-field-wrap input {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 14px;
+    }
+    .edit-ico { color: var(--accent); font-size: 14px; }
+
+    /* ── Скролл ──────────────────────────────── */
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--surf3); border-radius: 3px; }
   </style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════
-     AUTH — подключение API-токена WB
-════════════════════════════════════════════════════════ -->
-<div id="authSection" class="section active">
-  <h2 style="margin-bottom:4px">🛒 WB Supply Helper</h2>
-  <p class="hint">Управление перераспределением остатков между складами Wildberries.</p>
+<!-- ═══════ AUTH ═══════ -->
+<div id="screenAuth" class="screen active">
+  <div class="auth-wrap">
+    <div class="auth-logo">🛒</div>
+    <div class="auth-title">WB Supply Helper</div>
+    <div class="auth-sub">Управление перераспределением остатков между складами Wildberries</div>
 
-  <div class="token-steps">
-    <p>Как получить API-токен:</p>
-    <ol>
-      <li>Войдите в <b>seller.wildberries.ru</b></li>
-      <li>Профиль → <b>Настройки</b> → <b>Доступ к API</b></li>
-      <li>Нажмите <b>«Создать токен»</b></li>
-      <li>Отметьте категорию <b>Marketplace</b> (и <b>Content</b> для SKU)</li>
-      <li>Скопируйте токен ниже</li>
-    </ol>
+    <div class="steps-box">
+      <div class="steps-box-title">Как получить API-токен</div>
+      <div class="step-item"><div class="step-num">1</div><span>Войдите в <b style="color:var(--text)">seller.wildberries.ru</b></span></div>
+      <div class="step-item"><div class="step-num">2</div><span>Профиль → Настройки → <b style="color:var(--text)">Доступ к API</b></span></div>
+      <div class="step-item"><div class="step-num">3</div><span>Нажмите <b style="color:var(--text)">«Создать токен»</b></span></div>
+      <div class="step-item"><div class="step-num">4</div><span>Выберите категории <b style="color:var(--text)">Marketplace</b> и <b style="color:var(--text)">Content</b></span></div>
+      <div class="step-item"><div class="step-num">5</div><span>Скопируйте токен ниже</span></div>
+    </div>
+
+    <label class="field-label">API-токен Wildberries</label>
+    <input type="password" id="tokenInput" class="inp"
+      placeholder="eyJhbGciOiJFUzI1NiIsInR5cCI6Ikp..."
+      autocomplete="off" spellcheck="false" style="margin-bottom:10px" />
+    <div id="authMsg" class="msg"></div>
+    <button class="btn btn-accent" id="connectBtn" onclick="connectToken()" style="margin-top:12px">
+      Подключить
+    </button>
   </div>
-
-  <label class="field-label">API-токен Wildberries</label>
-  <input type="password" id="tokenInput"
-    placeholder="eyJhbGciOiJFUzI1NiIsInR5cCI6Ikp..."
-    autocomplete="off" spellcheck="false" />
-  <div id="authMsg" class="msg"></div>
-  <button class="btn btn-primary" id="connectBtn" onclick="connectToken()">Подключить</button>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════
-     MAIN — главный экран
-════════════════════════════════════════════════════════ -->
-<div id="mainSection" class="section">
-
-  <!-- Баланс -->
+<!-- ═══════ MAIN ═══════ -->
+<div id="screenMain" class="screen">
   <div class="balance-row">
-    <div class="balance-card">
-      <div class="val" id="balVal">0</div>
-      <div class="lbl">Баланс<br>перемещений</div>
+    <div class="bal-card">
+      <div class="bal-val" id="balVal">—</div>
+      <div class="bal-lbl">Баланс<br>перемещений</div>
     </div>
-    <div class="balance-card">
-      <div class="val" id="resVal">0</div>
-      <div class="lbl">Зарезервировано<br>перемещений</div>
+    <div class="bal-card">
+      <div class="bal-val" id="resVal">—</div>
+      <div class="bal-lbl">Зарезервировано<br>перемещений</div>
     </div>
   </div>
 
-  <!-- Статус токена -->
-  <div id="tokenBanner" class="info-banner" style="display:none"></div>
+  <div id="tokenBanner" class="info-banner" style="display:none">
+    <span>ℹ️</span><span id="tokenBannerText"></span>
+  </div>
 
-  <!-- Меню -->
-  <ul class="menu-list">
-    <li><button onclick="navigate('list')">
-      <span class="ico">📋</span> Список запросов на перемещение
-      <span class="chevron">›</span>
-    </button></li>
-    <li><button onclick="navigate('pay')">
-      <span class="ico">💳</span> Оплата
-      <span class="chevron">›</span>
-    </button></li>
-    <li><button onclick="navigate('history')">
-      <span class="ico">🧾</span> История оплат
-      <span class="chevron">›</span>
-    </button></li>
-    <li><button onclick="navigate('quotas')">
-      <span class="ico">📊</span> Текущие квоты
-      <span class="chevron">›</span>
-    </button></li>
-  </ul>
+  <div class="menu-block">
+    <button class="menu-item" onclick="go('list')">
+      <span class="menu-icon">≡</span> Список запросов на перемещение
+      <span class="menu-chevron">›</span>
+    </button>
+    <button class="menu-item" onclick="go('create')">
+      <span class="menu-icon">＋</span> Создать запрос
+      <span class="menu-chevron">›</span>
+    </button>
+    <button class="menu-item" onclick="go('batch')">
+      <span class="menu-icon">⊞</span> Создать списком
+      <span class="menu-chevron">›</span>
+    </button>
+    <button class="menu-item" onclick="go('pay')">
+      <span class="menu-icon">₽</span> Оплата
+      <span class="menu-chevron">›</span>
+    </button>
+    <button class="menu-item" onclick="go('history')">
+      <span class="menu-icon">≔</span> История оплат
+      <span class="menu-chevron">›</span>
+    </button>
+    <button class="menu-item" onclick="go('quotas')">
+      <span class="menu-icon">↑↓</span> Текущие квоты
+      <span class="menu-chevron">›</span>
+    </button>
+    <button class="menu-item" onclick="go('stats')">
+      <span class="menu-icon">↑↓</span> Статистика перемещений
+      <span class="menu-chevron">›</span>
+    </button>
+  </div>
+</div>
 
-  <div id="content"></div>
+<!-- ═══════ LIST ═══════ -->
+<div id="screenList" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('main')">‹</button>
+    <span class="screen-title">Автобронь перемещение</span>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" id="tabCur" onclick="switchTab('cur')">
+      <span class="tab-count" id="cntCur">0</span>Текущие
+    </button>
+    <button class="tab" id="tabArch" onclick="switchTab('arch')">
+      <span class="tab-count" id="cntArch">0</span>Архив
+    </button>
+  </div>
+
+  <button class="btn btn-accent" onclick="go('create')" style="margin-bottom:8px">
+    ＋&nbsp; Создать запрос
+  </button>
+  <button class="btn btn-surface" onclick="go('batch')" style="margin-bottom:14px">
+    ⊞&nbsp; Массовое создание (списком)
+  </button>
+
+  <div id="listBody"><div style="text-align:center;padding:30px"><span class="spinner"></span></div></div>
+</div>
+
+<!-- ═══════ CREATE ═══════ -->
+<div id="screenCreate" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('list')">‹</button>
+    <span class="screen-title">Автобронь перемещение</span>
+  </div>
+
+  <div class="form-card">
+    <div class="form-title">Новый запрос на перемещение</div>
+
+    <!-- Шаг 1: Поставщик -->
+    <div class="field-group" id="stepSupplier">
+      <div class="search-field" id="sfSupplier" onclick="toggleDrop('dropSupplier','sfSupplier')">
+        <span class="ico">🔍</span>
+        <input id="supplierInput" placeholder="Выберите поставщика..." readonly />
+        <button class="clear" id="clearSupplier" onclick="clearField('supplier',event)" style="display:none">✕</button>
+        <button class="chevron">⌄</button>
+      </div>
+      <div class="dropdown" id="dropSupplier" style="display:none"></div>
+    </div>
+
+    <!-- Шаг 2: Артикул -->
+    <div class="step" id="stepArticle">
+      <div class="field-group">
+        <div class="search-field" id="sfArticle">
+          <span class="ico">🔍</span>
+          <input id="articleInput" placeholder="Введите артикул WB..."
+            inputmode="numeric" oninput="onArticleInput()" />
+        </div>
+        <div id="articleStatus" style="font-size:12px;color:var(--text2);margin-top:6px;padding-left:4px"></div>
+      </div>
+    </div>
+
+    <!-- Шаг 3: Выбор найденного артикула -->
+    <div class="step" id="stepCardSelect">
+      <div class="field-group">
+        <div class="search-field open" id="sfCard">
+          <span class="ico">🔍</span>
+          <input id="cardDisplay" readonly />
+          <button class="clear" onclick="clearField('card',event)">✕</button>
+          <button class="chevron">⌄</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 4: Откуда -->
+    <div class="step" id="stepFrom">
+      <div class="field-group">
+        <div class="search-field" id="sfFrom" onclick="toggleDrop('dropFrom','sfFrom')">
+          <span class="ico">🔍</span>
+          <input id="fromInput" placeholder="Откуда забрать..." readonly />
+          <button class="clear" id="clearFrom" onclick="clearField('from',event)" style="display:none">✕</button>
+          <button class="chevron">⌄</button>
+        </div>
+        <div class="dropdown" id="dropFrom" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Шаг 5: Количество -->
+    <div class="step" id="stepQty">
+      <div class="field-group">
+        <div class="qty-label" id="qtyLabel">Количество</div>
+        <input type="number" class="qty-field" id="qtyInput"
+          placeholder="0" min="1" inputmode="numeric" oninput="onQtyInput()" />
+      </div>
+    </div>
+
+    <!-- Шаг 6: Куда -->
+    <div class="step" id="stepTo">
+      <div class="field-group">
+        <div class="search-field" id="sfTo" onclick="toggleDrop('dropTo','sfTo')">
+          <span class="ico">🔍</span>
+          <input id="toInput" placeholder="Куда отправить..." readonly />
+          <button class="clear" id="clearTo" onclick="clearField('to',event)" style="display:none">✕</button>
+          <button class="chevron">⌄</button>
+        </div>
+        <div class="dropdown" id="dropTo" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Шаг 7: Сохранить -->
+    <div class="step" id="stepSave">
+      <div id="createMsg" class="msg"></div>
+      <button class="btn btn-accent" id="saveBtn" onclick="saveRequest()" style="margin-top:10px">
+        Сохранить
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ BATCH ═══════ -->
+<div id="screenBatch" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('list')">‹</button>
+    <span class="screen-title">Массовое создание</span>
+  </div>
+
+  <div class="info-banner">
+    <span>ℹ️</span>
+    <span>Каждая строка: <b>Артикул; Откуда; Куда; Количество</b><br>
+    Пример: <b>991574484; Сарапул; Коледино; 10</b></span>
+  </div>
+
+  <textarea id="batchText" class="inp" rows="10"
+    placeholder="991574484; Сарапул; Коледино; 10&#10;334475849; Краснодар; Электросталь; 5&#10;..."
+    style="font-size:13px;font-family:monospace;resize:vertical;margin-bottom:10px"></textarea>
+
+  <div id="batchMsg" class="msg"></div>
+  <button class="btn btn-accent" onclick="submitBatch()">Создать все запросы</button>
+</div>
+
+<!-- ═══════ PAY ═══════ -->
+<div id="screenPay" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('main')">‹</button>
+    <span class="screen-title">Выберите способ оплаты</span>
+  </div>
+
+  <div class="pay-methods">
+    <div class="pay-method active" id="pmStd" onclick="selectPayMethod('std')">Стандартный</div>
+    <div class="pay-method" id="pmLink" onclick="selectPayMethod('link')">Ссылка</div>
+  </div>
+
+  <div class="pay-info-box">
+    <span id="payMethodDesc">Стандартный — оплата в окне приложения</span>
+  </div>
+
+  <label class="field-label">E-Mail для чеков:</label>
+  <div class="email-field-wrap" style="margin-bottom:16px">
+    <span class="edit-ico">✏️</span>
+    <input type="email" id="payEmail" placeholder="your@email.com" style="background:none;border:none;outline:none;color:var(--text);font-size:14px;width:100%" />
+  </div>
+
+  <div style="font-size:16px;font-weight:800;text-align:center;margin-bottom:12px">Перераспределения</div>
+
+  <div class="tariff-list" id="tariffList"></div>
+
+  <div id="payMsg" class="msg" style="margin-bottom:10px"></div>
+  <button class="btn btn-accent" onclick="submitPay()">Оплатить</button>
+</div>
+
+<!-- ═══════ HISTORY ═══════ -->
+<div id="screenHistory" class="screen">
+  <div style="display:flex;gap:8px;margin-bottom:18px">
+    <button class="btn btn-surface" onclick="go('main')" style="flex:1;padding:10px;font-size:13px">Назад в меню</button>
+    <button class="btn btn-accent" onclick="go('pay')" style="flex:1;padding:10px;font-size:13px">Новый платеж</button>
+  </div>
+  <div id="histBody"><div style="text-align:center;padding:30px"><span class="spinner"></span></div></div>
+</div>
+
+<!-- ═══════ QUOTAS ═══════ -->
+<div id="screenQuotas" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('main')">‹</button>
+    <span class="screen-title">Текущие квоты</span>
+  </div>
+  <div id="quotaBody"></div>
+</div>
+
+<!-- ═══════ STATS ═══════ -->
+<div id="screenStats" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('main')">‹</button>
+    <span class="screen-title">Статистика перемещений</span>
+  </div>
+  <div class="empty">
+    <div class="empty-ico">📈</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:8px">Скоро будет доступно</div>
+    <div style="font-size:13px;color:var(--text2)">Статистика перемещений появится<br>после выполнения первых запросов</div>
+  </div>
 </div>
 
 <script>
-// ───────────────────────────────────────────────────────
-// TELEGRAM MINI APP
-// ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// TELEGRAM
+// ═══════════════════════════════════════════════════════
 const tg = window.Telegram?.WebApp;
-
-// initData присутствует только когда открыто как Mini App
 const initData = tg?.initData || '';
-const isRealTelegramApp = initData.includes('hash=');
+const isReal = initData.includes('hash=');
 
-if (tg) { tg.ready(); tg.expand?.(); }
+if (tg) { tg.ready(); tg.expand?.(); tg.setHeaderColor?.('#12131e'); tg.setBackgroundColor?.('#12131e'); }
 
-console.log('[WB App] WebApp:', !!tg, '| initData len:', initData.length, '| has hash:', isRealTelegramApp);
-
-const AUTH_HEADERS = {
-  'Content-Type': 'application/json',
-  'Authorization': 'tma ' + initData
-};
+const H = { 'Content-Type':'application/json', 'Authorization':'tma '+initData };
 
 async function api(method, url, body) {
-  const res = await fetch(url, {
-    method,
-    headers: AUTH_HEADERS,
-    body: body ? JSON.stringify(body) : undefined
-  });
+  const res = await fetch(url, { method, headers: H, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || 'Ошибка ' + res.status), { status: res.status });
   return data;
 }
 
-// ───────────────────────────────────────────────────────
-// ИНИЦИАЛИЗАЦИЯ
-// ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// НАВИГАЦИЯ
+// ═══════════════════════════════════════════════════════
+const screens = ['Auth','Main','List','Create','Batch','Pay','History','Quotas','Stats'];
+function go(name) {
+  screens.forEach(s => {
+    const el = document.getElementById('screen' + s.charAt(0).toUpperCase() + s.slice(1));
+    if (el) el.classList.remove('active');
+  });
+  const id = 'screen' + name.charAt(0).toUpperCase() + name.slice(1);
+  const el = document.getElementById(id);
+  if (el) { el.classList.add('active'); window.scrollTo(0,0); }
+  const loaders = { list: loadList, history: loadHistory, quotas: loadQuotas };
+  if (loaders[name]) loaders[name]();
+  if (name === 'create') resetCreateForm();
+  if (name === 'pay') renderTariffs();
+}
+
+// ═══════════════════════════════════════════════════════
+// СТАРТ
+// ═══════════════════════════════════════════════════════
 async function init() {
-  // Если не настоящий Telegram Mini App — показываем инструкцию
-  if (!isRealTelegramApp) {
-    showTelegramError();
-    return;
-  }
+  if (!isReal) { showNoTg(); return; }
   try {
     const st = await api('GET', '/auth/status');
-    st.authorized ? showMain(st) : showAuth();
-  } catch (e) {
-    showAuth();
-  }
+    if (st.authorized) {
+      showMain(st);
+    } else {
+      go('auth');
+    }
+  } catch { go('auth'); }
 }
 
-function showTelegramError() {
+function showNoTg() {
   document.body.innerHTML = `
-    <div style="padding:24px;font-family:-apple-system,sans-serif;max-width:400px;margin:0 auto">
-      <div style="font-size:48px;text-align:center;margin-bottom:16px">⚠️</div>
-      <h2 style="font-size:20px;font-weight:700;margin-bottom:12px;text-align:center">
-        Откройте через Telegram
-      </h2>
-      <p style="font-size:14px;color:#666;line-height:1.6;margin-bottom:20px;text-align:center">
-        Это приложение работает только как Telegram Mini App.<br>
-        Открытие по прямой ссылке в браузере не поддерживается.
+    <div style="padding:32px 20px;font-family:-apple-system,sans-serif;background:#12131e;min-height:100vh;color:#f0f1ff">
+      <div style="text-align:center;font-size:48px;margin-bottom:16px">⚠️</div>
+      <h2 style="text-align:center;font-size:20px;font-weight:800;margin-bottom:12px">Откройте через Telegram</h2>
+      <p style="font-size:14px;color:#8b8fa8;text-align:center;line-height:1.6;margin-bottom:20px">
+        Приложение работает только как Telegram Mini App
       </p>
-      <div style="background:#f5f5f5;border-radius:12px;padding:16px;font-size:13px;color:#444;line-height:1.8">
-        <b>Как открыть:</b><br>
+      <div style="background:#1c1d2e;border:1px solid #333450;border-radius:12px;padding:16px;font-size:13px;color:#8b8fa8;line-height:1.8">
         1. Найдите бота в Telegram<br>
-        2. Нажмите кнопку меню (🔘) внизу<br>
-        &nbsp;&nbsp;&nbsp;или используйте команду /start<br>
-        3. Нажмите кнопку <b>«Открыть приложение»</b>
-      </div>
-      <div style="margin-top:16px;padding:12px;background:#fff3cd;border-radius:10px;font-size:12px;color:#856404">
-        <b>Debug info:</b><br>
-        Telegram.WebApp: ${!!tg}<br>
-        initData length: ${initData.length}<br>
-        has hash: ${isRealTelegramApp}
+        2. Напишите /start<br>
+        3. Нажмите кнопку <b style="color:#00d4e0">«🛒 Открыть приложение»</b>
       </div>
     </div>`;
-}
-
-function showAuth() {
-  document.getElementById('authSection').classList.add('active');
-  document.getElementById('mainSection').classList.remove('active');
 }
 
 function showMain(st) {
-  document.getElementById('authSection').classList.remove('active');
-  document.getElementById('mainSection').classList.add('active');
-
+  go('main');
   const banner = document.getElementById('tokenBanner');
   if (st?.expires_at) {
-    banner.style.display = 'block';
-    banner.innerHTML = st.is_expired
-      ? `⚠️ <b>Токен истёк</b> ${st.expires_at} — перейдите в <a href="#" onclick="navigate('settings');return false;" style="color:var(--link)">настройки</a> и обновите.`
-      : `✅ WB подключён · токен действует до <b>${st.expires_at}</b>`;
-  } else {
-    banner.style.display = 'none';
+    banner.style.display = 'flex';
+    document.getElementById('tokenBannerText').innerHTML = st.is_expired
+      ? `<b style="color:var(--danger)">Токен истёк</b> ${st.expires_at}`
+      : `WB подключён · токен до <b>${st.expires_at}</b>`;
   }
-
-  navigate('list');
 }
 
-// ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 // АВТОРИЗАЦИЯ
-// ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 async function connectToken() {
   const token = document.getElementById('tokenInput').value.trim();
-  const msgEl = document.getElementById('authMsg');
-  const btn   = document.getElementById('connectBtn');
-  msgEl.className = 'msg';
-  msgEl.textContent = '';
+  const msg = document.getElementById('authMsg');
+  const btn = document.getElementById('connectBtn');
+  msg.className = 'msg'; msg.style.display = 'none';
 
-  if (!token) { msgEl.className='msg msg-error'; msgEl.textContent='Вставьте API-токен'; return; }
+  if (!token) { showMsg('authMsg','error','Вставьте API-токен'); return; }
 
-  btn.innerHTML = '<span class="spinner"></span> Проверяем...';
-  btn.disabled = true;
-
+  btn.innerHTML = '<span class="spinner"></span> Проверяем...'; btn.disabled = true;
   try {
     const res = await api('POST', '/auth/set-token', { token });
     showMain({ expires_at: res.expires_at });
-  } catch (err) {
-    msgEl.className = 'msg msg-error';
-    msgEl.textContent = err.message;
-    btn.innerHTML = 'Подключить';
-    btn.disabled = false;
-  }
-}
-
-// ───────────────────────────────────────────────────────
-// НАВИГАЦИЯ
-// ───────────────────────────────────────────────────────
-function navigate(section) {
-  const c = document.getElementById('content');
-  c.innerHTML = '';
-  const map = {
-    list:     renderList,
-    create:   renderCreate,
-    pay:      renderPay,
-    history:  renderHistory,
-    quotas:   renderQuotas,
-    settings: renderSettings,
-  };
-  (map[section] || (() => {}))(c);
-}
-
-function backBtn(label, to) {
-  return `<button class="back-btn" onclick="navigate('${to}')">‹ ${label}</button>`;
-}
-
-// ───────────────────────────────────────────────────────
-// СПИСОК ЗАПРОСОВ
-// ───────────────────────────────────────────────────────
-async function renderList(c) {
-  c.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-      <h3 style="margin:0">Перемещения</h3>
-      <button class="btn-sm primary" onclick="navigate('create')">+ Создать запрос</button>
-    </div>
-    <div id="listBody"><span class="spinner"></span></div>`;
-
-  try {
-    const rows = await api('GET', '/transfers/list');
-    const el = document.getElementById('listBody');
-
-    if (!rows.length) {
-      el.innerHTML = `<div class="empty">
-        <div class="ico">📦</div>
-        <p>Запросов пока нет</p>
-        <button class="btn btn-primary" style="width:auto;padding:11px 28px" onclick="navigate('create')">+ Создать первый</button>
-      </div>`;
-      return;
-    }
-
-    const badge = s => {
-      const m = { pending:['badge-pending','Ожидает'], done:['badge-done','Выполнен'], failed:['badge-failed','Ошибка'] };
-      const [cls, lbl] = m[s] || ['badge-pending', s];
-      return `<span class="badge ${cls}">${lbl}</span>`;
-    };
-
-    el.innerHTML = '<div class="req-list">' + rows.map(r => `
-      <div class="req-row">
-        <div class="req-body">
-          <div class="req-title">
-            ${r.from_warehouse} → ${r.to_warehouse}
-          </div>
-          <div class="req-sub">Арт. ${r.sku} &nbsp;·&nbsp; ${badge(r.status)}</div>
-        </div>
-        <div class="req-count">${r.amount}</div>
-        <button class="btn-sm danger" onclick="deleteTransfer(${r.id})" title="Удалить">🗑</button>
-      </div>`).join('') + '</div>';
   } catch (e) {
-    document.getElementById('listBody').innerHTML = `<p class="msg msg-error">${e.message}</p>`;
+    showMsg('authMsg','error', e.message);
+    btn.innerHTML = 'Подключить'; btn.disabled = false;
   }
 }
 
-async function deleteTransfer(id) {
+// ═══════════════════════════════════════════════════════
+// СПИСОК ЗАПРОСОВ
+// ═══════════════════════════════════════════════════════
+let _allTransfers = [];
+let _curTab = 'cur';
+
+function switchTab(tab) {
+  _curTab = tab;
+  document.getElementById('tabCur').className  = 'tab' + (tab==='cur'  ? ' active' : '');
+  document.getElementById('tabArch').className = 'tab' + (tab==='arch' ? ' active' : '');
+  renderTransfers();
+}
+
+async function loadList() {
+  document.getElementById('listBody').innerHTML = '<div style="text-align:center;padding:30px"><span class="spinner"></span></div>';
+  try {
+    _allTransfers = await api('GET', '/transfers/list');
+    const cur  = _allTransfers.filter(r => r.status === 'pending');
+    const arch = _allTransfers.filter(r => r.status !== 'pending');
+    document.getElementById('cntCur').textContent  = cur.length;
+    document.getElementById('cntArch').textContent = arch.length;
+    renderTransfers();
+  } catch (e) {
+    document.getElementById('listBody').innerHTML = `<div class="msg msg-error show">${e.message}</div>`;
+  }
+}
+
+function renderTransfers() {
+  const rows = _allTransfers.filter(r => _curTab === 'cur' ? r.status === 'pending' : r.status !== 'pending');
+  const el = document.getElementById('listBody');
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-ico">📦</div><div>Запросов нет</div></div>`;
+    return;
+  }
+  el.innerHTML = rows.map(r => {
+    const d = new Date(r.created_at);
+    const date = `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+    return `
+    <div class="transfer-row">
+      <div class="tr-header">
+        <div class="tr-supplier">Текущий аккаунт WB</div>
+        <div class="tr-date">${date}</div>
+      </div>
+      <div class="route-pill">
+        <span>${r.from_warehouse}</span>
+        <span class="arrow">→</span>
+        <span>${r.to_warehouse}</span>
+      </div>
+      <div class="tr-footer">
+        <div class="tr-meta">Арт: <b>${r.sku}</b> &nbsp; Кол-во: <b>${r.amount}</b></div>
+        <div class="tr-actions">
+          ${r.status==='pending' ? `<button class="icon-btn icon-btn-edit" onclick="editQty(${r.id},${r.amount})" title="Редактировать">✏️</button>` : ''}
+          <button class="icon-btn icon-btn-del" onclick="delTransfer(${r.id})" title="Удалить">🗑</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function delTransfer(id) {
   if (!confirm(`Удалить запрос #${id}?`)) return;
   try {
     await api('DELETE', `/transfers/${id}`);
-    navigate('list');
-  } catch (e) { alert('Ошибка: ' + e.message); }
+    await loadList();
+  } catch(e) { alert('Ошибка: ' + e.message); }
 }
 
-// ───────────────────────────────────────────────────────
-// СОЗДАТЬ ЗАПРОС — пошаговая форма
-// ───────────────────────────────────────────────────────
-let _warehouses = [];   // кэш складов
-let _cards = {};        // nmId → { name, sizes }
-let _selectedCard = null;
-
-async function renderCreate(c) {
-  c.innerHTML = `
-    ${backBtn('Назад', 'list')}
-    <h3>Создать запрос</h3>
-
-    <!-- Шаг 1: Поставщик -->
-    <label class="field-label">Выберите поставщика</label>
-    <div class="field-wrap">
-      <select id="selSupplier" onchange="onSupplierChange()">
-        <option value="">— выберите —</option>
-      </select>
-      <button class="clear-btn" id="clearSupplier" onclick="clearSupplier()">✕</button>
-    </div>
-    <div id="msgSupplier" class="msg"></div>
-
-    <!-- Шаг 2: Артикул WB -->
-    <div class="step-block" id="step2">
-      <label class="field-label">Артикул WB</label>
-      <input type="text" id="nmInput" placeholder="Введите артикул WB"
-        inputmode="numeric" oninput="onNmInput()" />
-      <label class="field-label" id="labelSelect" style="display:none">Выберите артикул...</label>
-      <select id="selCard" style="display:none" onchange="onCardChange()">
-        <option value="">— выберите —</option>
-      </select>
-    </div>
-
-    <!-- Шаг 3: Откуда -->
-    <div class="step-block" id="step3">
-      <label class="field-label">Откуда забрать...</label>
-      <select id="selFrom" onchange="onFromChange()">
-        <option value="">— выберите склад —</option>
-      </select>
-    </div>
-
-    <!-- Шаг 4: Количество -->
-    <div class="step-block" id="step4">
-      <label class="field-label" id="labelAmt">Количество</label>
-      <input type="number" id="inpAmt" placeholder="1" min="1" inputmode="numeric" oninput="onAmtInput()" />
-    </div>
-
-    <!-- Шаг 5: Куда -->
-    <div class="step-block" id="step5">
-      <label class="field-label">Куда отправить...</label>
-      <select id="selTo" onchange="onToChange()">
-        <option value="">— выберите склад —</option>
-      </select>
-    </div>
-
-    <!-- Кнопка Сохранить -->
-    <div class="step-block" id="step6">
-      <div id="msgCreate" class="msg"></div>
-      <button class="btn btn-primary" id="saveBtn" onclick="saveRequest()">Сохранить</button>
-    </div>`;
-
-  // Загружаем склады + заполняем поставщиков (один продавец = одна запись с его токеном)
+async function editQty(id, current) {
+  const val = prompt(`Новое количество (было ${current}):`, current);
+  if (!val || isNaN(parseInt(val))) return;
   try {
-    _warehouses = await api('GET', '/transfers/warehouses');
-    // У нас один авторизованный продавец — подставляем фиктивно
-    const sel = document.getElementById('selSupplier');
-    // В текущей архитектуре один аккаунт = один продавец
-    // Если в будущем нужна мультиаккаунтность — расширить
-    sel.innerHTML = `<option value="">— выберите —</option>
-      <option value="current" selected>Текущий аккаунт WB</option>`;
-    // Автовыбор единственного поставщика
-    sel.value = 'current';
-    onSupplierChange();
-  } catch (e) {
-    document.getElementById('msgSupplier').className = 'msg msg-error';
-    document.getElementById('msgSupplier').textContent = e.message;
-  }
+    await api('PATCH', `/transfers/${id}`, { amount: parseInt(val) });
+    await loadList();
+  } catch(e) { alert('Ошибка: ' + e.message); }
 }
 
-function clearSupplier() {
-  document.getElementById('selSupplier').value = '';
+// ═══════════════════════════════════════════════════════
+// СОЗДАТЬ ЗАПРОС
+// ═══════════════════════════════════════════════════════
+let _state = {};
+
+function resetCreateForm() {
+  _state = {};
+  ['stepArticle','stepCardSelect','stepFrom','stepQty','stepTo','stepSave'].forEach(s => {
+    document.getElementById(s)?.classList.remove('on');
+  });
+  document.getElementById('supplierInput').value = '';
   document.getElementById('clearSupplier').style.display = 'none';
-  document.getElementById('msgSupplier').textContent = '';
-  hideSteps([2,3,4,5,6]);
-  _selectedCard = null;
+  document.getElementById('articleInput').value = '';
+  document.getElementById('qtyInput').value = '';
+  document.getElementById('articleStatus').textContent = '';
+  document.getElementById('createMsg').className = 'msg';
+  hideDrop('dropSupplier');
+  hideDrop('dropFrom');
+  hideDrop('dropTo');
+  // Поставщик — один аккаунт
+  const drop = document.getElementById('dropSupplier');
+  drop.innerHTML = `<div class="dropdown-item" onclick="selectSupplier('Текущий аккаунт WB')">Текущий аккаунт WB</div>`;
+  // Автовыбор
+  selectSupplier('Текущий аккаунт WB');
 }
 
-async function onSupplierChange() {
-  const val = document.getElementById('selSupplier').value;
-  const msgEl = document.getElementById('msgSupplier');
-  const clearBtn = document.getElementById('clearSupplier');
-  msgEl.textContent = '';
-
-  if (!val) { clearBtn.style.display='none'; hideSteps([2,3,4,5,6]); return; }
-  clearBtn.style.display = 'block';
-
-  // Проверяем наличие опции «Перераспределение» — делаем реальный запрос за складами
-  // Если склады получены — опция доступна; иначе — нет
-  if (!_warehouses.length) {
-    msgEl.className = 'msg msg-error';
-    msgEl.textContent = 'У пользователя не подключена опция «Перераспределение остатков между складами», дальнейшая работа невозможна.';
-    hideSteps([2,3,4,5,6]);
-    return;
-  }
-
-  showStep(2);
-}
-
-function onNmInput() {
-  const nm = document.getElementById('nmInput').value.trim();
-  const selCard = document.getElementById('selCard');
-  const labelSelect = document.getElementById('labelSelect');
-
-  // Скрываем ранние шаги при изменении
-  hideSteps([3,4,5,6]);
-  selCard.style.display = 'none';
-  labelSelect.style.display = 'none';
-  _selectedCard = null;
-
-  // Артикул WB — числовой, обычно 8-9 цифр
-  if (/^\d{6,}$/.test(nm)) {
-    // Ищем в кэше карточек
-    const match = Object.values(_cards).filter(c =>
-      String(c.nmId).startsWith(nm) || String(c.nmId) === nm
-    );
-    if (match.length) {
-      selCard.innerHTML = '<option value="">— выберите —</option>' +
-        match.map(c => `<option value="${c.nmId}">${c.nmId} — ${c.name}</option>`).join('');
-      selCard.style.display = 'block';
-      labelSelect.style.display = 'block';
-    } else {
-      // Загружаем с сервера карточки, если кэш пуст
-      loadCards(nm);
-    }
+function toggleDrop(dropId, fieldId) {
+  const drop = document.getElementById(dropId);
+  const sf   = document.getElementById(fieldId);
+  const isOpen = drop.style.display !== 'none';
+  hideAllDrops();
+  if (!isOpen) {
+    drop.style.display = 'block';
+    sf?.classList.add('open');
   }
 }
+function hideDrop(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = 'none';
+  const map = { dropSupplier:'sfSupplier', dropFrom:'sfFrom', dropTo:'sfTo' };
+  if (map[id]) document.getElementById(map[id])?.classList.remove('open');
+}
+function hideAllDrops() { ['dropSupplier','dropFrom','dropTo'].forEach(hideDrop); }
 
-async function loadCards(nm) {
-  const selCard = document.getElementById('selCard');
-  const labelSelect = document.getElementById('labelSelect');
-  selCard.innerHTML = '<option value="">⏳ Загрузка...</option>';
-  selCard.style.display = 'block';
-  labelSelect.style.display = 'block';
+function selectSupplier(name) {
+  _state.supplier = name;
+  document.getElementById('supplierInput').value = name;
+  document.getElementById('clearSupplier').style.display = 'block';
+  hideDrop('dropSupplier');
+  document.getElementById('stepArticle').classList.add('on');
+}
 
+function clearField(field, e) {
+  e?.stopPropagation();
+  if (field === 'supplier') {
+    _state = {};
+    document.getElementById('supplierInput').value = '';
+    document.getElementById('clearSupplier').style.display = 'none';
+    ['stepArticle','stepCardSelect','stepFrom','stepQty','stepTo','stepSave'].forEach(s =>
+      document.getElementById(s)?.classList.remove('on'));
+  }
+  if (field === 'card') {
+    delete _state.card;
+    document.getElementById('cardDisplay').value = '';
+    document.getElementById('articleInput').value = '';
+    ['stepCardSelect','stepFrom','stepQty','stepTo','stepSave'].forEach(s =>
+      document.getElementById(s)?.classList.remove('on'));
+    document.getElementById('stepArticle').classList.add('on');
+  }
+  if (field === 'from') {
+    delete _state.from; delete _state.fromMax;
+    document.getElementById('fromInput').value = '';
+    document.getElementById('clearFrom').style.display = 'none';
+    ['stepQty','stepTo','stepSave'].forEach(s => document.getElementById(s)?.classList.remove('on'));
+  }
+  if (field === 'to') {
+    delete _state.to;
+    document.getElementById('toInput').value = '';
+    document.getElementById('clearTo').style.display = 'none';
+    document.getElementById('stepSave').classList.remove('on');
+  }
+}
+
+let _articleTimer = null;
+function onArticleInput() {
+  const val = document.getElementById('articleInput').value.trim();
+  clearTimeout(_articleTimer);
+  document.getElementById('articleStatus').textContent = '';
+  ['stepCardSelect','stepFrom','stepQty','stepTo','stepSave'].forEach(s =>
+    document.getElementById(s)?.classList.remove('on'));
+  delete _state.card; delete _state.from; delete _state.to;
+
+  if (!/^\d{5,}$/.test(val)) return;
+  document.getElementById('articleStatus').textContent = '⏳ Поиск...';
+  _articleTimer = setTimeout(() => searchArticle(val), 600);
+}
+
+async function searchArticle(nmId) {
   try {
-    // Получаем все карточки через /transfers/warehouses (склады уже есть)
-    // Карточки — через Content API (если токен имеет права Content)
-    // Заглушка: если API карточек недоступен — показываем поле ввода вручную
-    selCard.innerHTML = `<option value="">— введите вручную ниже —</option>
-      <option value="manual">Ввести артикул вручную</option>`;
-  } catch {
-    selCard.innerHTML = '<option value="">Ошибка загрузки</option>';
+    const res = await api('GET', `/transfers/article-stocks/${nmId}`);
+    if (!res.name) {
+      document.getElementById('articleStatus').textContent = '❌ Артикул не найден';
+      return;
+    }
+    document.getElementById('articleStatus').textContent = '';
+    _state.card = { nmId, name: res.name, warehouses: res.warehouses || [] };
+    document.getElementById('cardDisplay').value = `(${nmId}) ${res.name}`;
+    document.getElementById('stepCardSelect').classList.add('on');
+    buildFromDrop(res.warehouses || []);
+    document.getElementById('stepFrom').classList.add('on');
+  } catch(e) {
+    document.getElementById('articleStatus').textContent = `❌ ${e.message}`;
   }
 }
 
-function onCardChange() {
-  const val = document.getElementById('selCard').value;
-  hideSteps([3,4,5,6]);
-  _selectedCard = null;
-
-  if (!val) return;
-
-  if (val === 'manual') {
-    // Разрешаем вручную — используем значение nmInput как SKU
-    const nm = document.getElementById('nmInput').value.trim();
-    _selectedCard = { nmId: nm, name: 'Артикул ' + nm, skus: [] };
-  } else {
-    _selectedCard = _cards[val] || { nmId: val, name: 'Артикул ' + val, skus: [] };
-  }
-
-  buildFromSelect();
-  showStep(3);
-}
-
-function buildFromSelect() {
-  const sel = document.getElementById('selFrom');
-  sel.innerHTML = '<option value="">— выберите склад —</option>' +
-    _warehouses.map(w =>
-      `<option value="${w.name}|${w.id}">${w.name}</option>`
-    ).join('');
-}
-
-function onFromChange() {
-  const val = document.getElementById('selFrom').value;
-  hideSteps([4,5,6]);
-
-  if (!val) return;
-
-  const [wName] = val.split('|');
-  // Лимит количества — в реальной интеграции берётся из остатков товара на складе
-  // Пока ставим условный лимит; после интеграции getStocks — заменить на реальное число
-  const maxAmt = 9999; // TODO: getStocks(warehouseId, [sku]) → amount
-  document.getElementById('labelAmt').textContent = `Количество (не более ${maxAmt})`;
-  document.getElementById('inpAmt').max = maxAmt;
-  document.getElementById('inpAmt').value = '';
-  showStep(4);
-}
-
-function onAmtInput() {
-  const amt = parseInt(document.getElementById('inpAmt').value, 10);
-  const max = parseInt(document.getElementById('inpAmt').max, 10);
-  hideSteps([5,6]);
-
-  if (!amt || amt < 1) return;
-  if (max && amt > max) {
-    document.getElementById('inpAmt').value = max;
+function buildFromDrop(warehouses) {
+  const drop = document.getElementById('dropFrom');
+  if (!warehouses.length) {
+    drop.innerHTML = '<div class="dropdown-item" style="color:var(--text2)">Нет остатков ни на одном складе</div>';
     return;
   }
-
-  buildToSelect();
-  showStep(5);
+  drop.innerHTML = warehouses.map(w =>
+    `<div class="dropdown-item" onclick="selectFrom('${w.name}',${w.amount})">${w.name} (${w.amount})</div>`
+  ).join('');
 }
 
-function buildToSelect() {
-  const fromVal = document.getElementById('selFrom').value;
-  const [fromName] = fromVal.split('|');
-  const sel = document.getElementById('selTo');
-  sel.innerHTML = '<option value="">— выберите склад —</option>' +
-    _warehouses
-      .filter(w => w.name !== fromName)
-      .map(w => `<option value="${w.name}">${w.name}</option>`)
-      .join('');
+function selectFrom(name, amount) {
+  _state.from = name; _state.fromMax = amount;
+  document.getElementById('fromInput').value = `${name} (${amount})`;
+  document.getElementById('clearFrom').style.display = 'block';
+  hideDrop('dropFrom');
+  document.getElementById('qtyLabel').textContent = `Количество (не более ${amount})`;
+  document.getElementById('qtyInput').max = amount;
+  document.getElementById('qtyInput').value = '';
+  document.getElementById('stepQty').classList.add('on');
+  ['stepTo','stepSave'].forEach(s => document.getElementById(s)?.classList.remove('on'));
 }
 
-function onToChange() {
-  const val = document.getElementById('selTo').value;
-  if (val) showStep(6); else hideSteps([6]);
+function onQtyInput() {
+  const val = parseInt(document.getElementById('qtyInput').value, 10);
+  const max = parseInt(document.getElementById('qtyInput').max, 10);
+  document.getElementById('stepTo').classList.remove('on');
+  document.getElementById('stepSave').classList.remove('on');
+  if (!val || val < 1) return;
+  if (val > max) { document.getElementById('qtyInput').value = max; return; }
+  _state.qty = val;
+  buildToDrop();
+  document.getElementById('stepTo').classList.add('on');
+}
+
+function buildToDrop() {
+  const all = _state.card?.warehouses || [];
+  const drop = document.getElementById('dropTo');
+  // Показываем все склады из WB, исключая выбранный
+  const fromName = _state.from;
+  const list = all.length
+    ? all.filter(w => w.name !== fromName)
+    : [];
+  // Если список пустой — показываем все склады из кэша
+  const items = list.length ? list.map(w=>w.name) : _whCache.filter(w=>w.name!==fromName).map(w=>w.name);
+  drop.innerHTML = items.map(n =>
+    `<div class="dropdown-item" onclick="selectTo('${n}')">${n}</div>`
+  ).join('') || '<div class="dropdown-item" style="color:var(--text2)">Нет доступных складов</div>';
+}
+
+function selectTo(name) {
+  _state.to = name;
+  document.getElementById('toInput').value = name;
+  document.getElementById('clearTo').style.display = 'block';
+  hideDrop('dropTo');
+  document.getElementById('stepSave').classList.add('on');
+}
+
+let _whCache = [];
+async function preloadWarehouses() {
+  try { _whCache = await api('GET', '/transfers/warehouses'); } catch {}
 }
 
 async function saveRequest() {
-  const fromRaw = document.getElementById('selFrom').value;
-  const to      = document.getElementById('selTo').value;
-  const amt     = parseInt(document.getElementById('inpAmt').value, 10);
-  const sku     = _selectedCard?.nmId || document.getElementById('nmInput').value.trim();
-  const msgEl   = document.getElementById('msgCreate');
-  const btn     = document.getElementById('saveBtn');
+  const btn = document.getElementById('saveBtn');
+  const { from, to, card, qty } = _state;
+  if (!from||!to||!card||!qty) { showMsg('createMsg','error','Заполните все поля'); return; }
 
-  msgEl.textContent = '';
-  if (!fromRaw || !to || !sku || !amt) {
-    msgEl.className = 'msg msg-error'; msgEl.textContent = 'Заполните все поля'; return;
-  }
-
-  const [from] = fromRaw.split('|');
-  btn.innerHTML = '<span class="spinner"></span> Сохраняем...';
-  btn.disabled = true;
-
+  btn.innerHTML = '<span class="spinner"></span> Сохраняем...'; btn.disabled = true;
   try {
     await api('POST', '/transfers/create', {
-      from_warehouse: from,
-      to_warehouse: to,
-      sku: String(sku),
-      amount: amt
+      from_warehouse: from, to_warehouse: to,
+      sku: String(card.nmId), amount: qty
     });
-    navigate('list');
-  } catch (e) {
-    msgEl.className = 'msg msg-error';
-    msgEl.textContent = e.message;
-    btn.innerHTML = 'Сохранить';
-    btn.disabled = false;
+    go('list');
+  } catch(e) {
+    showMsg('createMsg','error', e.message);
+    btn.innerHTML = 'Сохранить'; btn.disabled = false;
   }
 }
 
-function showStep(n) { document.getElementById('step'+n)?.classList.add('visible'); }
-function hideSteps(ns) { ns.forEach(n => {
-  const el = document.getElementById('step'+n);
-  el?.classList.remove('visible');
-}); }
+// ═══════════════════════════════════════════════════════
+// МАССОВОЕ СОЗДАНИЕ
+// ═══════════════════════════════════════════════════════
+async function submitBatch() {
+  const text = document.getElementById('batchText').value.trim();
+  if (!text) { showMsg('batchMsg','error','Введите данные'); return; }
 
-// ───────────────────────────────────────────────────────
-// ОПЛАТА
-// ───────────────────────────────────────────────────────
-const TARIFFS = [
-  {u:100,p:200},{u:200,p:400},{u:500,p:1000},{u:1000,p:2000},
-  {u:2000,p:4000},{u:5000,p:10000},{u:10000,p:20000},{u:20000,p:40000}
-];
-let _tariff = null;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  let ok = 0, fail = 0;
+  showMsg('batchMsg','warn', `Обрабатываем ${lines.length} строк...`);
 
-function renderPay(c) {
-  _tariff = null;
-  c.innerHTML = `
-    ${backBtn('Назад', 'list')}
-    <h3>Оплата</h3>
+  for (const line of lines) {
+    const parts = line.split(';').map(s => s.trim());
+    if (parts.length < 4) { fail++; continue; }
+    const [sku, from_warehouse, to_warehouse, amtStr] = parts;
+    const amount = parseInt(amtStr);
+    if (!sku || !from_warehouse || !to_warehouse || !amount) { fail++; continue; }
+    try {
+      await api('POST', '/transfers/create', { from_warehouse, to_warehouse, sku, amount });
+      ok++;
+    } catch { fail++; }
+  }
 
-    <label class="field-label">E-Mail для чеков</label>
-    <input type="email" id="payEmail" placeholder="you@example.com" inputmode="email" />
-
-    <label class="field-label" style="margin-top:18px">Перераспределения</label>
-    <div class="tariff-grid" id="tariffGrid">
-      ${TARIFFS.map(t => `
-        <div class="tariff-card" onclick="selTariff(${t.u},${t.p},this)">
-          <div class="t-units">${t.u.toLocaleString('ru')} ед.</div>
-          <div class="t-price">${t.p.toLocaleString('ru')} ₽</div>
-        </div>`).join('')}
-    </div>
-
-    <div id="payMsg" class="msg"></div>
-    <button class="btn btn-primary" onclick="submitPay()">Оплатить</button>`;
+  const msg = `✅ Создано: ${ok}${fail ? ` | ❌ Ошибок: ${fail}` : ''}`;
+  showMsg('batchMsg', fail ? 'warn' : 'success', msg);
+  if (ok > 0) { document.getElementById('batchText').value = ''; setTimeout(() => go('list'), 1500); }
 }
 
-function selTariff(u, p, el) {
-  document.querySelectorAll('.tariff-card').forEach(c => c.classList.remove('sel'));
-  el.classList.add('sel');
-  _tariff = { u, p };
+// ═══════════════════════════════════════════════════════
+// ОПЛАТА
+// ═══════════════════════════════════════════════════════
+const TARIFFS = [
+  {u:100,   p:400  }, {u:200,  p:700  }, {u:500,   p:1600 },
+  {u:1000,  p:2999 }, {u:2000, p:5999 }, {u:5000,  p:14000},
+  {u:10000, p:25000}, {u:20000,p:39999}, {u:50000, p:49999},
+];
+let _tariff = null, _payMethod = 'std';
+
+function selectPayMethod(m) {
+  _payMethod = m;
+  document.getElementById('pmStd').className  = 'pay-method' + (m==='std'  ? ' active' : '');
+  document.getElementById('pmLink').className = 'pay-method' + (m==='link' ? ' active' : '');
+  document.getElementById('payMethodDesc').textContent = m === 'std'
+    ? 'Стандартный — оплата в окне приложения'
+    : 'Ссылка — оплата на сайте ЮKassы (больше видов оплаты, ссылку можно переслать)';
+}
+
+function renderTariffs() {
+  _tariff = null;
+  document.getElementById('tariffList').innerHTML = TARIFFS.map((t,i) => `
+    <div class="tariff-row" id="tr${i}" onclick="selTariff(${i})">
+      <div class="tariff-dot"></div>
+      <div class="tariff-name">${t.u.toLocaleString('ru')} единиц товара</div>
+      <div class="tariff-price">${t.p.toLocaleString('ru')}₽</div>
+    </div>`).join('');
+}
+
+function selTariff(i) {
+  document.querySelectorAll('.tariff-row').forEach(r => r.classList.remove('sel'));
+  document.getElementById('tr'+i)?.classList.add('sel');
+  _tariff = TARIFFS[i];
 }
 
 async function submitPay() {
   const email = document.getElementById('payEmail').value.trim();
-  const msgEl = document.getElementById('payMsg');
-  msgEl.textContent = '';
-
-  if (!email || !email.includes('@')) {
-    msgEl.className='msg msg-error'; msgEl.textContent='Введите корректный e-mail'; return;
-  }
-  if (!_tariff) {
-    msgEl.className='msg msg-error'; msgEl.textContent='Выберите тариф'; return;
-  }
-
+  if (!email || !email.includes('@')) { showMsg('payMsg','error','Введите корректный e-mail'); return; }
+  if (!_tariff) { showMsg('payMsg','error','Выберите тариф'); return; }
   try {
-    await api('POST', '/payments/create', { email, units: _tariff.u, amount: _tariff.p });
-  } catch (e) {
-    // Сервис ещё не подключён — показываем информационное сообщение
-    msgEl.className='msg msg-warn';
-    msgEl.textContent=`Платёж ${_tariff.p.toLocaleString('ru')} ₽ за ${_tariff.u.toLocaleString('ru')} ед. — ЮKassa будет подключена в ближайшее время.`;
+    await api('POST', '/payments/create', { email, units: _tariff.u, amount: _tariff.p, method: _payMethod });
+  } catch {
+    showMsg('payMsg','warn', `Платёж ${_tariff.p.toLocaleString('ru')} ₽ за ${_tariff.u.toLocaleString('ru')} ед. — ЮKassa будет подключена в ближайшее время.`);
   }
 }
 
-// ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 // ИСТОРИЯ ОПЛАТ
-// ───────────────────────────────────────────────────────
-async function renderHistory(c) {
-  c.innerHTML = `
-    ${backBtn('Назад', 'list')}
-    <h3>История оплат</h3>
-    <div id="histBody"><span class="spinner"></span></div>`;
-
+// ═══════════════════════════════════════════════════════
+async function loadHistory() {
+  document.getElementById('histBody').innerHTML = '<div style="text-align:center;padding:30px"><span class="spinner"></span></div>';
   try {
     const rows = await api('GET', '/payments/history');
     const el = document.getElementById('histBody');
     if (!rows.length) {
-      el.innerHTML=`<div class="empty"><div class="ico">🧾</div><p>Платежей пока нет</p></div>`;
+      el.innerHTML = `<div class="empty"><div class="empty-ico">🧾</div><div>Платежей пока нет</div></div>`;
       return;
     }
-    el.innerHTML = rows.map(p => `
+    el.innerHTML = rows.map((p, i) => {
+      const isPaid    = p.status === 'succeeded' || p.status === 'paid';
+      const isPending = p.status === 'pending' || p.status === 'waiting';
+      const dt = new Date(p.created_at).toLocaleString('ru-RU',{
+        day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'
+      });
+      return `
       <div class="pay-row">
-        <div>
-          <div style="font-size:15px;font-weight:600">${p.units ? p.units.toLocaleString('ru')+' ед.' : '—'}</div>
-          <div class="pay-meta">
-            ${new Date(p.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
-            &nbsp;·&nbsp; <span class="badge badge-done">Оплачен</span>
-          </div>
+        <div class="pay-dot-col">
+          <div class="pay-dot ${isPaid?'paid':isPending?'pending':''}"></div>
+          ${i < rows.length-1 ? '<div class="pay-line"></div>' : ''}
         </div>
-        <div class="pay-amount">${Number(p.amount).toLocaleString('ru')} ₽</div>
-      </div>`).join('');
-  } catch (e) {
-    document.getElementById('histBody').innerHTML=`<p class="msg msg-error">${e.message}</p>`;
+        <div class="pay-body">
+          <div class="pay-datetime">${dt}</div>
+          <div class="pay-amount">${Number(p.amount).toLocaleString('ru')} ₽</div>
+          <div class="pay-units">${p.units ? p.units.toLocaleString('ru') + ' единиц товара' : '—'}</div>
+          ${isPaid    ? `<span class="badge badge-paid">оплачен</span>` : ''}
+          ${isPending ? `<span class="badge badge-pending">ожидает оплаты</span>` : ''}
+          ${isPending ? `<button class="btn btn-accent" style="margin-top:8px;padding:9px" onclick="go('pay')">Оплатить</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('histBody').innerHTML = `<div class="msg msg-error show">${e.message}</div>`;
   }
 }
 
-// ───────────────────────────────────────────────────────
-// ТЕКУЩИЕ КВОТЫ
-// ───────────────────────────────────────────────────────
-// Официального API для квот перераспределения у WB нет.
-// Показываем актуальные лимиты складов из публичной информации WB
-// (обновляются вручную; в будущем можно автоматизировать через парсинг ЛК).
+// ═══════════════════════════════════════════════════════
+// КВОТЫ
+// ═══════════════════════════════════════════════════════
 const QUOTA_DATA = [
-  { name: 'Коледино',                out: '25 000', inn: '25 000' },
-  { name: 'Электросталь',            out: '25 000', inn: '25 000' },
-  { name: 'Казань',                  out: '10 000', inn: '10 000' },
-  { name: 'Краснодар',               out: '25 000', inn: '25 000' },
-  { name: 'Невинномысск',            out: '25 000', inn: '25 000' },
-  { name: 'Новосибирск',             out: '25 000', inn: '25 000' },
-  { name: 'Екатеринбург',            out: '25 000', inn: '25 000' },
-  { name: 'Хабаровск',               out: '25 000', inn: '25 000' },
-  { name: 'Санкт-Петербург (Шушары)',out: '25 000', inn: '—'      },
-  { name: 'Пенза',                   out: '—',      inn: '20 000' },
-  { name: 'Новосемейкино',           out: '100 000',inn: '100 000'},
-  { name: 'Екатеринбург (Перспективная)', out:'100 000', inn:'100 000'},
-  { name: 'Сарапул',                 out: '5 000',  inn: '5 000'  },
-  { name: 'Владимир Воршинское',     out: '1 000',  inn: '1 000'  },
+  {name:'Белые Столбы',           inn:0,      out:14977},
+  {name:'Владимир Воршинское',    inn:22792,  out:0    },
+  {name:'Волгоград',              inn:12608,  out:0    },
+  {name:'Екатеринбург - Перспективная 14', inn:13604, out:0},
+  {name:'Екатеринбург',           inn:25000,  out:25000},
+  {name:'Казань',                 inn:10000,  out:10000},
+  {name:'Коледино',               inn:25000,  out:25000},
+  {name:'Краснодар',              inn:25000,  out:25000},
+  {name:'Невинномысск',           inn:25000,  out:25000},
+  {name:'Новосибирск',            inn:25000,  out:25000},
+  {name:'Новосемейкино',          inn:100000, out:100000},
+  {name:'Пенза',                  inn:20000,  out:0    },
+  {name:'Санкт-Петербург (Шушары)',inn:0,     out:25000},
+  {name:'Сарапул',                inn:5000,   out:5000 },
+  {name:'Тула',                   inn:8000,   out:8000 },
+  {name:'Хабаровск',              inn:25000,  out:25000},
+  {name:'Электросталь',           inn:25000,  out:25000},
 ];
 
-function renderQuotas(c) {
-  c.innerHTML = `
-    ${backBtn('Назад', 'list')}
-    <h3>Текущие квоты</h3>
-
-    <div class="info-banner">
-      Официального API для квот перераспределения у Wildberries нет.
-      Суточные лимиты складов делятся между всеми продавцами.
-      Данные обновлены на <b>март 2026 г.</b>
-    </div>
-
-    <div style="display:flex;gap:0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);margin-bottom:4px">
-      <div style="flex:1;padding:9px 12px;background:var(--secondary);font-size:12px;font-weight:600;color:var(--hint)">СКЛАД</div>
-      <div style="width:88px;padding:9px 8px;background:var(--secondary);font-size:12px;font-weight:600;color:var(--hint);text-align:center">ИСХОД., ед/сут</div>
-      <div style="width:88px;padding:9px 8px;background:var(--secondary);font-size:12px;font-weight:600;color:var(--hint);text-align:center">ВХОД., ед/сут</div>
-    </div>
-
-    ${QUOTA_DATA.map(q => `
-      <div class="quota-row">
-        <div class="q-name">${q.name}</div>
-        <div class="q-val" style="width:88px;text-align:center">${q.out}</div>
-        <div class="q-val" style="width:88px;text-align:center">${q.inn}</div>
-      </div>`).join('')}
-
-    <p class="hint" style="margin-top:16px">
-      Если лимит склада исчерпан, заявку можно подать на следующий день.
-      Лимиты могут меняться — следите за уведомлениями в ЛК Wildberries.
-    </p>`;
+function sparklineSvg(maxVal, color, direction) {
+  // Генерируем убывающую ступенчатую кривую (имитация суточного расхода квоты)
+  const w=52, h=28, steps=8;
+  const pts = [];
+  let cur = maxVal > 0 ? maxVal : 0;
+  for(let i=0;i<steps;i++) {
+    const y = maxVal > 0 ? h - Math.round((cur/maxVal)*h*0.85) - 2 : h-2;
+    pts.push([Math.round(i*(w/(steps-1))), y]);
+    cur = Math.max(0, cur - Math.random()*maxVal*0.15);
+  }
+  const path = pts.map((p,i)=>i===0?`M${p[0]},${p[1]}`:`H${p[0]}V${p[1]}`).join('');
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block">
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>`;
 }
 
-// ───────────────────────────────────────────────────────
-// НАСТРОЙКИ (доступ из banner)
-// ───────────────────────────────────────────────────────
-function renderSettings(c) {
-  c.innerHTML = `
-    ${backBtn('Назад', 'list')}
-    <h3>Настройки</h3>
-    <p class="hint">Если токен истёк, отключите текущий аккаунт и подключите новый токен.</p>
-    <button class="btn btn-danger" onclick="disconnectToken()">Отключить Wildberries</button>`;
+function loadQuotas() {
+  document.getElementById('quotaBody').innerHTML = QUOTA_DATA.map(q => `
+    <div class="quota-row">
+      <div class="quota-chart">
+        ${sparklineSvg(q.inn, '#4da6ff', 'in')}
+        ${sparklineSvg(q.out, '#2ed573', 'out')}
+      </div>
+      <div class="quota-info">
+        <div class="quota-in">${q.inn.toLocaleString('ru')} → на склад</div>
+        <div class="quota-name">${q.name}</div>
+        <div class="quota-out">${q.out.toLocaleString('ru')} ← со склада</div>
+      </div>
+    </div>`).join('');
 }
 
-async function disconnectToken() {
-  if (!confirm('Отключить аккаунт Wildberries?')) return;
-  try {
-    await api('DELETE', '/auth/token');
-    document.getElementById('tokenInput').value = '';
-    showAuth();
-  } catch (e) { alert('Ошибка: ' + e.message); }
+// ═══════════════════════════════════════════════════════
+// ХЕЛПЕРЫ
+// ═══════════════════════════════════════════════════════
+function showMsg(id, type, text) {
+  const el = document.getElementById(id);
+  el.className = `msg msg-${type} show`;
+  el.textContent = text;
 }
 
-// ───────────────────────────────────────────────────────
+// Закрытие дропдаунов по тапу вне
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-field') && !e.target.closest('.dropdown')) hideAllDrops();
+});
+
+// ═══════════════════════════════════════════════════════
 // СТАРТ
-// ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
 init();
+preloadWarehouses();
 </script>
 </body>
 </html>

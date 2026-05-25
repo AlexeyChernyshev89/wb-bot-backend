@@ -10,7 +10,7 @@ const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards } = require('./wb-api');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks } = require('./wb-api');
 const path = require('path');
 const fs   = require('fs');
 
@@ -458,6 +458,45 @@ app.get('/transfers/list', telegramAuth, requireDB, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Ошибка загрузки списка' });
+  }
+});
+
+
+/**
+ * PATCH /transfers/:id
+ * Обновить количество в запросе
+ */
+app.patch('/transfers/:id', telegramAuth, requireDB, async (req, res) => {
+  const { id } = req.params;
+  const { amount } = req.body;
+  if (!amount || parseInt(amount) < 1) return res.status(400).json({ error: 'Некорректное количество' });
+  try {
+    const r = await db.query(
+      `UPDATE transfer_requests SET amount=$1, updated_at=NOW()
+       WHERE id=$2 AND user_id=$3 AND status='pending' RETURNING *`,
+      [parseInt(amount), id, req.telegramId]
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'Запрос не найден' });
+    res.json({ success: true, request: r.rows[0] });
+  } catch(err) { res.status(500).json({ error: 'Ошибка обновления' }); }
+});
+
+/**
+ * GET /transfers/article-stocks/:nmId
+ * Поиск товара по артикулу WB + остатки по складам
+ */
+app.get('/transfers/article-stocks/:nmId', telegramAuth, requireDB, async (req, res) => {
+  const { nmId } = req.params;
+  if (!/^\d+$/.test(nmId)) return res.status(400).json({ error: 'Некорректный артикул' });
+  try {
+    const token = await getUserToken(req.telegramId);
+    if (!token) return res.status(401).json({ error: 'Сначала подключите WB API-токен' });
+    const { article, warehouses } = await getArticleStocks(token, nmId);
+    if (!article) return res.status(404).json({ error: 'Артикул не найден. Проверьте номер или права токена (нужна категория Content).' });
+    res.json({ nmId: article.nmId, name: article.name, warehouses });
+  } catch(err) {
+    console.error('article-stocks error:', err.message);
+    res.status(500).json({ error: 'Ошибка получения данных: ' + (err.wbDetail || err.message) });
   }
 });
 
