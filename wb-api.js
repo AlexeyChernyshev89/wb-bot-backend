@@ -8,6 +8,7 @@ const axios = require('axios');
 
 const WB_MARKETPLACE_API = 'https://marketplace-api.wildberries.ru';
 const WB_CONTENT_API     = 'https://content-api.wildberries.ru';
+const WB_STATISTICS_API  = 'https://statistics-api.wildberries.ru';
 
 /**
  * Базовый HTTP-клиент для WB API с обработкой ошибок.
@@ -216,35 +217,94 @@ async function getArticleByNmId(token, nmId) {
 }
 
 /**
- * Получить склады с ненулевыми остатками для данного артикула.
- * Возвращает: [{ id, name, amount }]
+ * Получить FBO остатки товара по всем складам WB через Statistics API.
+ * GET /api/v1/supplier/stocks — возвращает остатки на складах WB (FBO).
+ *
+ * ВАЖНО: токен должен иметь категорию «Статистика» (Statistics).
+ * Поля ответа: warehouseName, nmId, quantity (доступно к продаже),
+ *              quantityFull (полный остаток включая в пути), inWayToClient, inWayFromClient.
+ */
+async function getFboStocksRaw(token) {
+  // dateFrom=2019-01-01 — получаем полный актуальный снимок остатков
+  return apiRequest('GET', WB_STATISTICS_API,
+    '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
+}
+
+/**
+ * Получить склады с ненулевыми FBO остатками для конкретного артикула.
+ * Возвращает: { article: { nmId, name }, warehouses: [{ name, amount }] }
+ *
+ * Стратегия:
+ * 1. Statistics API — точные FBO остатки по складам WB (требует категорию Statistics в токене)
+ * 2. Fallback: Marketplace API /api/v3/stocks (FBS, склады продавца) — если Statistics недоступен
  */
 async function getArticleStocks(token, nmId) {
+  const target = parseInt(nmId);
+
+  // Получаем название товара (Content API)
   const article = await getArticleByNmId(token, nmId);
-  if (!article || !article.skus.length) return { article: null, warehouses: [] };
 
-  const warehouses = await getWarehouses(token);
-  const result = [];
+  // === Попытка 1: Statistics API (FBO — склады Wildberries) ===
+  try {
+    const allStocks = await getFboStocksRaw(token);
+    const rows = Array.isArray(allStocks) ? allStocks : [];
 
-  // Проверяем склады параллельно (батчами по 5 чтобы не превысить rate limit)
-  const batchSize = 5;
-  for (let i = 0; i < warehouses.length; i += batchSize) {
-    const batch = warehouses.slice(i, i + batchSize);
-    await Promise.all(batch.map(async wh => {
-      try {
-        const stocks = await getStocks(token, wh.id, article.skus);
-        const total = (stocks.stocks || []).reduce((s, x) => s + (x.amount || 0), 0);
-        if (total > 0) result.push({ id: wh.id, name: wh.name, amount: total });
-      } catch {}
-    }));
+    console.log(`[stocks] Statistics API: total rows=${rows.length}`);
+
+    const byWarehouse = {};
+    for (const item of rows) {
+      if (item.nmId !== target) continue;
+      const qty = item.quantity || 0;   // доступно к продаже
+      if (qty <= 0) continue;
+      const wh = item.warehouseName;
+      byWarehouse[wh] = (byWarehouse[wh] || 0) + qty;
+    }
+
+    const warehouses = Object.entries(byWarehouse)
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+
+    console.log(`[stocks] nmId=${nmId} found in ${warehouses.length} warehouses`);
+
+    const articleInfo = article || { nmId: target, name: `Артикул ${nmId}`, skus: [] };
+    return { article: articleInfo, warehouses, source: 'statistics' };
+
+  } catch (statErr) {
+    console.warn(`[stocks] Statistics API failed (${statErr.status || statErr.message}). Trying Marketplace API fallback...`);
+
+    // === Fallback: Marketplace API (FBS — собственные склады продавца) ===
+    if (!article || !article.skus.length) {
+      // Если нет ни Statistics, ни Content — возвращаем пустоту с понятной ошибкой
+      const err = new Error(
+        statErr.status === 401 || statErr.status === 403
+          ? 'Нет доступа к Statistics API. Добавьте категорию «Статистика» в токен WB.'
+          : 'Не удалось получить остатки. Проверьте права токена.'
+      );
+      err.hint = 'statistics_token_required';
+      throw err;
+    }
+
+    const allWarehouses = await getWarehouses(token);
+    const result = [];
+    const batchSize = 5;
+
+    for (let i = 0; i < allWarehouses.length; i += batchSize) {
+      const batch = allWarehouses.slice(i, i + batchSize);
+      await Promise.all(batch.map(async wh => {
+        try {
+          const stocks = await getStocks(token, wh.id, article.skus);
+          const total = (stocks.stocks || []).reduce((s, x) => s + (x.amount || 0), 0);
+          if (total > 0) result.push({ id: wh.id, name: wh.name, amount: total });
+        } catch {}
+      }));
+    }
+    result.sort((a, b) => b.amount - a.amount);
+    return { article, warehouses: result, source: 'marketplace_fallback' };
   }
-
-  result.sort((a, b) => b.amount - a.amount);
-  return { article, warehouses: result };
 }
 
 module.exports = {
   getWarehouses, getStocks, updateStocks, deleteStocks,
   getCardsList, getAllCards, extractSkusFromCards,
-  getArticleByNmId, getArticleStocks
+  getArticleByNmId, getArticleStocks, getFboStocksRaw
 };

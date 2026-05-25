@@ -491,12 +491,20 @@ app.get('/transfers/article-stocks/:nmId', telegramAuth, requireDB, async (req, 
   try {
     const token = await getUserToken(req.telegramId);
     if (!token) return res.status(401).json({ error: 'Сначала подключите WB API-токен' });
-    const { article, warehouses } = await getArticleStocks(token, nmId);
-    if (!article) return res.status(404).json({ error: 'Артикул не найден. Проверьте номер или права токена (нужна категория Content).' });
+    const { article, warehouses, source } = await getArticleStocks(token, nmId);
+    if (!article) return res.status(404).json({
+      error: 'Артикул не найден. Убедитесь что токен имеет категории Content и Статистика.'
+    });
+    console.log(`[article-stocks] nmId=${nmId} source=${source} warehouses=${warehouses.length}`);
     res.json({ nmId: article.nmId, name: article.name, warehouses });
   } catch(err) {
-    console.error('article-stocks error:', err.message);
-    res.status(500).json({ error: 'Ошибка получения данных: ' + (err.wbDetail || err.message) });
+    console.error('article-stocks error:', err.message, err.hint || '');
+    const hint = err.hint === 'statistics_token_required'
+      ? ' Откройте настройки API-токена в ЛК WB и добавьте категорию «Статистика».'
+      : '';
+    res.status(err.status < 500 ? err.status || 500 : 500).json({
+      error: (err.wbDetail || err.message) + hint
+    });
   }
 });
 
