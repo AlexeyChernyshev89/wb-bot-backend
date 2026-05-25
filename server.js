@@ -284,12 +284,17 @@ app.get('/auth/status', telegramAuth, requireDB, async (req, res) => {
     );
     const row = result.rows[0];
 
-    const hasSession = !!(row?.wb_session_token);
+    const hasSession  = !!(row?.wb_session_token);
     const hasApiToken = !!(row?.wb_token);
 
-    // Авторизован если есть хоть что-то
+    // Не авторизован совсем
     if (!hasSession && !hasApiToken) {
       return res.json({ authorized: false });
+    }
+
+    // Есть API-токен но нет сессии — требуем SMS
+    if (!hasSession && hasApiToken) {
+      return res.json({ authorized: false, requires_sms: true });
     }
 
     // Данные по API токену
@@ -678,7 +683,8 @@ app.get('/transfers/wb-warehouses', telegramAuth, requireDB, async (req, res) =>
     res.json({ warehouses: names });
   } catch(err) {
     console.error('wb-warehouses error:', err.message);
-    res.status(500).json({ error: err.message });
+    // Возвращаем пустой список — фронтенд использует QUOTA_DATA как fallback
+    res.json({ warehouses: [], error: err.message });
   }
 });
 

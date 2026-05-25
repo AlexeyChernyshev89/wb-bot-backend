@@ -385,6 +385,9 @@
     <span>ℹ️</span><span id="tokenBannerText"></span>
   </div>
 
+  <!-- Баннер SMS-сессии — оранжевый, появляется если нет SMS-авторизации -->
+  <div id="sessionBanner" style="display:none;flex-direction:row;align-items:center;gap:8px;background:rgba(255,149,0,.15);border:1px solid var(--warning);border-radius:var(--radius);padding:12px 14px;font-size:13px;color:var(--text);margin-bottom:14px"></div>
+
   <div class="menu-block">
     <button class="menu-item" onclick="go('list')">
       <span class="menu-icon">≡</span> Список запросов на перемещение
@@ -828,6 +831,8 @@ async function init() {
     if (st.authorized) {
       showMain(st);
     } else {
+      // requires_sms: true — есть API-токен но нет SMS-сессии
+      // В обоих случаях показываем экран SMS-авторизации
       go('auth');
     }
   } catch { go('auth'); }
