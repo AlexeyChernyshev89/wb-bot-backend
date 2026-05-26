@@ -757,10 +757,8 @@ function go(name) {
 // АВТОРИЗАЦИЯ — SMS (главный экран)
 // ═══════════════════════════════════════════════════════
 async function authSendSms() {
-  const phone = document.getElementById('authPhone').value.trim();
+  const phone = (document.getElementById('authPhone').value || '').trim();
   const btn   = document.getElementById('authPhoneBtn');
-
-  // Сбрасываем сообщение
   const msgEl = document.getElementById('authPhoneMsg');
   if (msgEl) { msgEl.style.display = 'none'; msgEl.className = 'msg'; }
 
@@ -772,26 +770,146 @@ async function authSendSms() {
   btn.innerHTML = '<span class="spinner"></span> Отправляем...';
   btn.disabled = true;
 
-  try {
-    const res = await api('POST', '/auth/request-sms', { phone });
-    // Успех — показываем поле кода
-    document.getElementById('authPhoneDisplay').textContent = phone;
-    document.getElementById('authPhoneStep').style.display = 'none';
-    document.getElementById('authCodeStep').style.display  = 'block';
-    setTimeout(() => document.getElementById('authCode')?.focus(), 100);
-  } catch(e) {
-    // Показываем ошибку — и через alert на случай если CSS не работает
-    const errText = e.message || 'Ошибка отправки SMS';
-    if (msgEl) {
-      msgEl.style.display = 'block';
-      msgEl.className = 'msg msg-error show';
-      msgEl.textContent = errText;
+  // WB SMS Auth endpoints — запрос идёт напрямую из браузера Telegram,
+  // минуя Railway (который не может резолвить .ru домены)
+  const WB_ENDPOINTS = [
+    'https://content-suppliers.wildberries.ru/passport/api/v2/auth',
+    'https://seller.wildberries.ru/passport/api/v2/auth',
+  ];
+
+  let lastErr = '';
+  for (const base of WB_ENDPOINTS) {
+    try {
+      console.log('[SMS] Trying:', base);
+      const res = await fetch(base + '/login_by_phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phone, is_terms_and_conditions_accepted: true })
+      });
+      const data = await res.json();
+      console.log('[SMS] Response:', res.status, JSON.stringify(data).substring(0, 100));
+
+      if (res.status === 429) { lastErr = 'Слишком много попыток. Подождите несколько минут.'; break; }
+      if (res.status === 400) { lastErr = data.message || 'Неверный номер телефона'; break; }
+      if (!res.ok) { lastErr = 'WB ошибка ' + res.status; continue; }
+
+      const token = data.token || data.requestToken || data.requestId;
+      if (!token) { lastErr = 'WB не вернул токен. Ответ: ' + JSON.stringify(data); continue; }
+
+      // Сохраняем на сервере для шага 2
+      window._wbSmsToken = token;
+      window._wbSmsPhone = phone;
+      await api('POST', '/auth/save-sms-state', { phone: phone, requestToken: token });
+
+      document.getElementById('authPhoneDisplay').textContent = phone;
+      document.getElementById('authPhoneStep').style.display = 'none';
+      document.getElementById('authCodeStep').style.display  = 'block';
+      setTimeout(() => document.getElementById('authCode') && document.getElementById('authCode').focus(), 100);
+      btn.innerHTML = '📲 Получить SMS-код';
+      btn.disabled = false;
+      return;
+
+    } catch(e) {
+      lastErr = base + ': ' + e.message;
+      console.warn('[SMS] endpoint failed:', lastErr);
     }
-    alert('Ошибка: ' + errText);
-    btn.innerHTML = '📲 Получить SMS-код';
-    btn.disabled = false;
   }
+
+  const errText = lastErr || 'Не удалось отправить SMS';
+  if (msgEl) { msgEl.style.display = 'block'; msgEl.className = 'msg msg-error show'; msgEl.textContent = errText; }
+  alert('Ошибка: ' + errText);
+  btn.innerHTML = '📲 Получить SMS-код';
+  btn.disabled = false;
 }
+
+async function authVerifySms() {
+  const code = (document.getElementById('authCode').value || '').trim();
+  const btn  = document.getElementById('authCodeBtn');
+  const msgEl = document.getElementById('authCodeMsg');
+  if (msgEl) { msgEl.style.display = 'none'; msgEl.className = 'msg'; }
+
+  if (!code || code.length < 4) {
+    if (msgEl) { msgEl.style.display = 'block'; msgEl.className = 'msg msg-error show'; msgEl.textContent = 'Введите код из SMS'; }
+    return;
+  }
+
+  btn.innerHTML = '<span class="spinner"></span> Проверяем...';
+  btn.disabled = true;
+
+  const WB_ENDPOINTS = [
+    'https://content-suppliers.wildberries.ru/passport/api/v2/auth',
+    'https://seller.wildberries.ru/passport/api/v2/auth',
+  ];
+
+  const requestToken = window._wbSmsToken;
+  if (!requestToken) {
+    if (msgEl) { msgEl.style.display = 'block'; msgEl.className = 'msg msg-error show'; msgEl.textContent = 'Сначала запросите SMS-код'; }
+    btn.innerHTML = '✅ Подтвердить'; btn.disabled = false;
+    return;
+  }
+
+  let lastErr = '';
+  for (const base of WB_ENDPOINTS) {
+    try {
+      console.log('[SMS] Verifying via:', base);
+      const res = await fetch(base + '/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: requestToken, options: { notify_code: code } }),
+        credentials: 'include'
+      });
+      const data = await res.json();
+      console.log('[SMS] Verify response:', res.status, JSON.stringify(data).substring(0, 150));
+
+      if (res.status === 400 || res.status === 422) { lastErr = data.message || 'Неверный SMS-код'; break; }
+      if (!res.ok) { lastErr = 'WB ошибка ' + res.status; continue; }
+
+      // Ищем сессионный токен в ответе
+      const sessionToken = data.token || data.accessToken || data.access_token
+        || data.jwt || data.authToken;
+
+      if (sessionToken) {
+        // Отправляем токен на сервер для сохранения
+        await api('POST', '/auth/set-session-token', { token: sessionToken });
+        showMain({ has_session: true });
+        return;
+      }
+
+      // Если токен не в теле — пробуем получить из Set-Cookie через сервер
+      // Отправляем код на сервер который повторит запрос и извлечёт cookies
+      const phone = window._wbSmsPhone;
+      const serverRes = await api('POST', '/auth/verify-sms', { code: code, phone: phone, requestToken: requestToken });
+      showMain({ has_session: true });
+      return;
+
+    } catch(e) {
+      lastErr = base + ': ' + e.message;
+      console.warn('[SMS] verify failed:', lastErr);
+      // Fallback на сервер
+      try {
+        await api('POST', '/auth/verify-sms', { code: code });
+        showMain({ has_session: true });
+        return;
+      } catch(serverErr) {
+        lastErr = serverErr.message;
+      }
+    }
+  }
+
+  const errText = lastErr || 'Ошибка подтверждения кода';
+  if (msgEl) { msgEl.style.display = 'block'; msgEl.className = 'msg msg-error show'; msgEl.textContent = errText; }
+  btn.innerHTML = '✅ Подтвердить'; btn.disabled = false;
+}
+
+function authResetPhone() {
+  document.getElementById('authPhoneStep').style.display = 'block';
+  document.getElementById('authCodeStep').style.display  = 'none';
+  const inp = document.getElementById('authCode');
+  if (inp) inp.value = '';
+  const btn = document.getElementById('authPhoneBtn');
+  if (btn) { btn.innerHTML = '📲 Получить SMS-код'; btn.disabled = false; }
+}
+
 async function authVerifySms() {
   const code = document.getElementById('authCode').value.trim();
   const btn  = document.getElementById('authCodeBtn');

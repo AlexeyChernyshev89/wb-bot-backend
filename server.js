@@ -530,6 +530,30 @@ app.patch('/transfers/:id', telegramAuth, requireDB, async (req, res) => {
 // SMS АВТОРИЗАЦИЯ — получение Authorizev3 через ЛК продавца WB
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
+/**
+ * POST /auth/save-sms-state
+ * Сохраняет requestToken из клиентского SMS-запроса.
+ * Клиент делает запрос к WB напрямую (Railway не может резолвить .ru),
+ * получает requestToken и сохраняет его здесь для шага 2.
+ */
+app.post('/auth/save-sms-state', telegramAuth, requireDB, async (req, res) => {
+  const { phone, requestToken } = req.body;
+  if (!phone || !requestToken) return res.status(400).json({ error: 'phone и requestToken обязательны' });
+  try {
+    await db.query(
+      `INSERT INTO sms_requests (telegram_id, phone, request_token, created_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (telegram_id) DO UPDATE
+         SET phone=$2, request_token=$3, created_at=NOW()`,
+      [req.telegramId, phone, requestToken]
+    );
+    res.json({ success: true });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /**
  * POST /auth/request-sms
  * Шаг 1: Запросить SMS-код на телефон продавца.
