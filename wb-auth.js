@@ -56,6 +56,41 @@ const BROWSER_HEADERS = {
   'Accept-Language':'ru-RU,ru;q=0.9,en-US;q=0.8',
 };
 
+
+/**
+ * Получить начальные cookies от seller.wildberries.ru
+ * WB проверяет наличие session cookies (wbx-validation-key и др.)
+ * перед отправкой SMS — без них принимает запрос но SMS не шлёт.
+ */
+async function getWbSessionCookies() {
+  const urls = [
+    'https://seller.wildberries.ru/',
+    'https://seller.wildberries.ru/login',
+  ];
+  for (const url of urls) {
+    try {
+      const res = await axios.get(url, {
+        headers: {
+          'User-Agent':     BROWSER_HEADERS['User-Agent'],
+          'Accept':         'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language':'ru-RU,ru;q=0.9,en-US;q=0.8',
+          'Accept-Encoding':'gzip, deflate, br',
+        },
+        httpsAgent: WB_AGENT,
+        timeout:    10000,
+        maxRedirects: 5,
+      });
+      const setCookies = res.headers['set-cookie'] || [];
+      const cookieStr  = setCookies.map(c => c.split(';')[0]).join('; ');
+      console.log('[wb-auth] Got cookies from', url, ':', cookieStr.substring(0, 120));
+      if (cookieStr.length > 0) return cookieStr;
+    } catch(e) {
+      console.warn('[wb-auth] Could not get cookies from', url, ':', e.message);
+    }
+  }
+  return '';
+}
+
 /**
  * Шаг 1 — запросить SMS-код на номер телефона.
  * @param {string} phone — номер в формате +79991234567
@@ -67,14 +102,18 @@ async function requestSmsCode(phone) {
 
   let lastError = null;
 
+  // Получаем начальные cookies от WB (нужны чтобы SMS реально отправился)
+  const wbCookies = await getWbSessionCookies();
+  const authHeaders = { ...BROWSER_HEADERS, ...(wbCookies ? { Cookie: wbCookies } : {}) };
+
   // Перебираем эндпоинты — WB периодически меняет URL
   for (const base of WB_AUTH_ENDPOINTS) {
     try {
-      console.log(`[wb-auth] Trying: ${base}/login_by_phone`);
+      console.log(`[wb-auth] Trying: ${base}/login_by_phone | cookies: ${wbCookies.substring(0, 80)}`);
       const res = await axios.post(
         `${base}/login_by_phone`,
         { phone: cleanPhone, is_terms_and_conditions_accepted: true },
-        { headers: BROWSER_HEADERS, timeout: 12000, httpsAgent: WB_AGENT, validateStatus: s => s < 500 }
+        { headers: authHeaders, timeout: 12000, httpsAgent: WB_AGENT, validateStatus: s => s < 500 }
       );
 
       const status = res.status;
@@ -129,6 +168,7 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
   const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
   const cleanCode  = smsCode.trim();
   console.log(`[wb-auth] Подтверждение кода ${cleanCode} для ${cleanPhone}`);
+  const wbCookies  = await getWbSessionCookies();
 
   try {
     // используем тот же базовый URL что сработал (или первый по умолчанию)
