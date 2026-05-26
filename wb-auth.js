@@ -84,19 +84,27 @@ async function requestSmsCode(phone) {
       if (status === 400) return { success: false, error: res.data?.message || 'Неверный номер телефона' };
       if (status === 404) return { success: false, error: 'Продавец с этим номером не найден на WB' };
 
-      if (status !== 200) {
-        lastError = `HTTP ${status}: ${JSON.stringify(res.data)}`;
-        continue; // пробуем следующий эндпоинт
-      }
-
-      const requestToken = res.data?.token || res.data?.requestId || res.data?.requestToken || null;
-      if (!requestToken) {
-        console.warn('[wb-auth] No token in response:', JSON.stringify(res.data));
-        lastError = 'WB не вернул токен запроса. Ответ: ' + JSON.stringify(res.data)?.substring(0, 80);
+      // 204 = SMS успешно отправлена (нет тела ответа) — это нормальный ответ WB
+      // 200 = SMS отправлена с токеном в теле
+      if (status !== 200 && status !== 204) {
+        lastError = `HTTP ${status}: ${JSON.stringify(res.data)?.substring(0, 60)}`;
         continue;
       }
 
-      console.log(`[wb-auth] ✅ SMS запрошен через ${base}. Token: ${requestToken.substring(0, 20)}...`);
+      // Логируем заголовки для отладки
+      console.log(`[wb-auth] ${base} → ${status} | headers:`, JSON.stringify(res.headers || {}).substring(0, 200));
+      console.log(`[wb-auth] body:`, JSON.stringify(res.data)?.substring(0, 100));
+
+      // При 204 нет токена — используем phone как идентификатор сессии
+      const requestToken = res.data?.token || res.data?.requestId || res.data?.requestToken
+        || (status === 204 ? 'phone:' + cleanPhone : null);
+
+      if (!requestToken) {
+        lastError = 'WB не вернул токен. Ответ: ' + JSON.stringify(res.data)?.substring(0, 80);
+        continue;
+      }
+
+      console.log('[wb-auth] ✅ SMS отправлена через', base, '| token:', requestToken.substring(0, 30));
       return { success: true, requestToken };
 
     } catch (err) {
@@ -125,12 +133,18 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
   try {
     // используем тот же базовый URL что сработал (или первый по умолчанию)
     const base = WB_AUTH_ENDPOINTS[0];
+    // Если requestToken начинается с 'phone:' — WB вернул 204 без токена.
+    // В этом случае отправляем phone напрямую без token (некоторые версии WB API).
+    const isPhoneBased = requestToken && requestToken.startsWith('phone:');
+    const confirmBody = isPhoneBased
+      ? { phone: cleanPhone, code: cleanCode, options: { notify_code: cleanCode } }
+      : { token: requestToken, options: { notify_code: cleanCode } };
+
+    console.log('[wb-auth] confirm body:', JSON.stringify(confirmBody).substring(0, 100));
+
     const res = await axios.post(
       `${base}/login`,
-      {
-        token:   requestToken,
-        options: { notify_code: cleanCode },
-      },
+      confirmBody,
       {
         headers:          BROWSER_HEADERS,
         timeout:          15000,
