@@ -327,62 +327,43 @@
     <div class="auth-title">WB Supply Helper</div>
     <div class="auth-sub">Автоматическое бронирование перемещений между складами Wildberries</div>
 
-    <!-- Шаг 1: кнопка открыть WB -->
-    <div id="authStep1">
+    <!-- Шаг A: ввод телефона -->
+    <div id="authPhoneStep">
       <div class="steps-box" style="margin-bottom:20px">
-        <div class="steps-box-title">Как подключить аккаунт WB</div>
-        <div class="step-item"><div class="step-num">1</div><span>Нажмите кнопку ниже — откроется <b style="color:var(--text)">seller.wildberries.ru</b></span></div>
-        <div class="step-item"><div class="step-num">2</div><span>Войдите в аккаунт через SMS если не вошли</span></div>
-        <div class="step-item"><div class="step-num">3</div><span>Перейдите в <b style="color:var(--text)">Управление остатками</b></span></div>
-        <div class="step-item"><div class="step-num">4</div><span>Нажмите <b style="color:var(--text)">F12</b> → Network → найдите запрос к <b style="color:var(--accent)">seller-supply.wildberries.ru</b></span></div>
-        <div class="step-item"><div class="step-num">5</div><span>Headers → скопируйте значение <b style="color:var(--accent)">Authorizev3</b></span></div>
+        <div class="steps-box-title">Как войти</div>
+        <div class="step-item"><div class="step-num">1</div><span>Введите номер телефона от аккаунта <b style="color:var(--text)">продавца WB</b></span></div>
+        <div class="step-item"><div class="step-num">2</div><span>Получите SMS-код и введите его</span></div>
+        <div class="step-item"><div class="step-num">3</div><span>Готово — бот будет автоматически бронировать квоты</span></div>
       </div>
 
-      <button class="btn btn-accent" onclick="openWbSite()" style="margin-bottom:12px">
-        🌐 Открыть seller.wildberries.ru
-      </button>
-
-      <div style="text-align:center;font-size:12px;color:var(--text2);margin-bottom:12px">— или —</div>
-
-      <button class="btn btn-surface" onclick="showAuthTokenInput()">
-        🔑 У меня уже есть Authorizev3 токен
-      </button>
-    </div>
-
-    <!-- Шаг 2: вставить токен -->
-    <div id="authStep2" style="display:none">
-      <label class="field-label">Authorizev3 токен из DevTools</label>
-      <div style="position:relative;margin-bottom:4px">
-        <input type="password" id="authTokenInput" class="inp"
-          placeholder="eyJhbGciOiJFUzI1NiIsInR5cCI6Ikp..."
-          autocomplete="off" spellcheck="false"
-          style="padding-right:44px;font-size:12px" />
-        <button onclick="toggleAuthTokenVis()" id="authTokenEye"
-          style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text2);font-size:16px;cursor:pointer">👁</button>
-      </div>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:10px">
-        Начинается с <span style="color:var(--accent);font-family:monospace">eyJ...</span> длиной ~200+ символов
-      </div>
-      <div id="authTokenMsg" class="msg"></div>
-      <button class="btn btn-accent" id="authTokenBtn" onclick="submitAuthToken()">
-        ✅ Подключить
-      </button>
-      <button class="btn btn-surface" onclick="document.getElementById('authStep1').style.display='block';document.getElementById('authStep2').style.display='none'" style="margin-top:8px">
-        ← Назад
-      </button>
-    </div>
-
-    <!-- Скрытые поля для SMS (используются если server-side сработает) -->
-    <div id="authPhoneStep" style="display:none">
-      <input type="tel" id="authPhone" class="inp" placeholder="+7..." />
-      <button id="authPhoneBtn" onclick="authSendSms()"></button>
+      <label class="field-label">Номер телефона продавца WB</label>
+      <input type="tel" id="authPhone" class="inp"
+        placeholder="+7 (999) 123-45-67"
+        inputmode="tel" style="margin-bottom:8px" />
       <div id="authPhoneMsg" class="msg"></div>
+      <button class="btn btn-accent" id="authPhoneBtn" onclick="authSendSms()">
+        📲 Получить SMS-код
+      </button>
     </div>
+
+    <!-- Шаг B: ввод SMS-кода -->
     <div id="authCodeStep" style="display:none">
-      <input type="text" id="authCode" class="inp" placeholder="123456" />
-      <button id="authCodeBtn" onclick="authVerifySms()"></button>
+      <p style="text-align:center;font-size:14px;color:var(--text2);margin-bottom:20px">
+        Код отправлен на<br>
+        <b id="authPhoneDisplay" style="color:var(--text);font-size:16px"></b>
+      </p>
+      <label class="field-label">Код из SMS</label>
+      <input type="text" id="authCode" class="inp"
+        placeholder="123456"
+        inputmode="numeric" maxlength="6"
+        style="letter-spacing:10px;font-size:28px;text-align:center;margin-bottom:8px" />
       <div id="authCodeMsg" class="msg"></div>
-      <span id="authPhoneDisplay"></span>
+      <button class="btn btn-accent" id="authCodeBtn" onclick="authVerifySms()">
+        ✅ Подтвердить
+      </button>
+      <button class="btn btn-surface" onclick="authResetPhone()" style="margin-top:8px">
+        ← Изменить номер
+      </button>
     </div>
   </div>
 </div>
