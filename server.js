@@ -207,8 +207,10 @@ async function telegramAuth(req, res, next) {
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 async function getUserSessionToken(telegramId) {
-  const r = await db.query('SELECT wb_session_token FROM users WHERE telegram_id=$1', [telegramId]);
-  return r.rows[0]?.wb_session_token || null;
+  const r = await db.query('SELECT wb_session_token, wb_token FROM users WHERE telegram_id=$1', [telegramId]);
+  const row = r.rows[0];
+  // Возвращаем сессионный токен, или если его нет — пробуем API-токен как Authorizev3
+  return row?.wb_session_token || row?.wb_token || null;
 }
 
 // ─── Вспомогательная функция: получить wb_token пользователя ─────────────────
@@ -576,12 +578,25 @@ app.post('/auth/request-sms', telegramAuth, requireDB, async (req, res) => {
   if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
 
   try {
-    const result = await requestSmsCode(phone);
+    const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
+    console.log('[auth/request-sms] Phone:', cleanPhone);
+    const result = await requestSmsCode(cleanPhone);
+    console.log('[auth/request-sms] Result:', JSON.stringify(result).substring(0, 200));
+
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error });
+      // Если Railway не может достучаться до WB — подсказываем открыть на мобильном
+      const isNetworkError = result.error && (
+        result.error.includes('ENOTFOUND') ||
+        result.error.includes('ECONNREFUSED') ||
+        result.error.includes('network') ||
+        result.error.includes('Failed to fetch')
+      );
+      const userMsg = isNetworkError
+        ? 'Сервер не может достучаться до WB. Пожалуйста, откройте приложение в мобильном Telegram (iOS/Android) — там авторизация работает напрямую.'
+        : result.error;
+      return res.status(400).json({ success: false, error: userMsg });
     }
 
-    // Сохраняем requestToken для шага 2
     await db.query(
       `INSERT INTO sms_requests (telegram_id, phone, request_token, created_at)
        VALUES ($1, $2, $3, NOW())

@@ -33,22 +33,18 @@ const WB_AGENT = new https.Agent({ lookup: wbLookup, keepAlive: false, family: 4
 
 console.log('[wb-auth] Custom DNS agent initialized (Google 8.8.8.8 / Cloudflare 1.1.1.1)');
 
-// Эндпоинты авторизации WB
-// Если задана переменная WB_AUTH_PROXY (Cloudflare Worker) — используем её первой:
-// Railway не может резолвить .ru домены напрямую, но Cloudflare Worker может.
-// Деплой прокси: см. cloudflare-worker.js в репозитории
 const WB_AUTH_PROXY = process.env.WB_AUTH_PROXY || '';
 
+// Порядок: прямые WB эндпоинты ПЕРВЫМИ (Railway EU + IPv4 + Google DNS)
+// Cloudflare Worker — в конце как fallback (WB блокирует Cloudflare IP)
 const WB_AUTH_ENDPOINTS = [
-  // 1. Cloudflare Worker прокси (если задан в env)
-  ...(WB_AUTH_PROXY ? [WB_AUTH_PROXY + '/passport/api/v2/auth'] : []),
-  // 2. Прямые WB эндпоинты (работают если DNS резолвится)
+  'https://passport.wildberries.ru/api/v2/auth',
   'https://content-suppliers.wildberries.ru/passport/api/v2/auth',
   'https://seller.wildberries.ru/passport/api/v2/auth',
-  'https://passport.wildberries.ru/api/v2/auth',
+  ...(WB_AUTH_PROXY ? [WB_AUTH_PROXY + '/passport/api/v2/auth'] : []),
 ];
 
-console.log('[wb-auth] Auth endpoints:', WB_AUTH_ENDPOINTS.length, WB_AUTH_PROXY ? '(proxy: ' + WB_AUTH_PROXY + ')' : '(no proxy)');
+console.log('[wb-auth] Auth endpoints:', WB_AUTH_ENDPOINTS.length, '| proxy:', WB_AUTH_PROXY || 'none');
 
 // Общие заголовки — имитируем браузер на seller.wildberries.ru
 const BROWSER_HEADERS = {
