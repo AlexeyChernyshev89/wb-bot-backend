@@ -3,7 +3,34 @@
 // Шаг 1: POST /passport/api/v2/auth/login_by_phone → requestToken
 // Шаг 2: POST /passport/api/v2/auth/login + SMS-код → Cookie сессии → Authorizev3 JWT
 
-const axios = require('axios');
+const axios  = require('axios');
+const dns    = require('dns');
+const https  = require('https');
+
+// ─── Кастомный DNS-резолвер ────────────────────────────────────────────────
+// Railway иногда не резолвит .ru домены через свой дефолтный DNS.
+// Явно используем Google (8.8.8.8) и Cloudflare (1.1.1.1).
+const wbResolver = new dns.Resolver();
+wbResolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+
+function wbLookup(hostname, options, callback) {
+  wbResolver.resolve4(hostname, (err, addrs) => {
+    if (!err && addrs && addrs.length) {
+      return callback(null, addrs[0], 4);
+    }
+    // fallback to IPv6
+    wbResolver.resolve6(hostname, (err2, addrs6) => {
+      if (!err2 && addrs6 && addrs6.length) return callback(null, addrs6[0], 6);
+      // fallback to system DNS
+      dns.lookup(hostname, options, callback);
+    });
+  });
+}
+
+// HTTPS-агент с кастомным lookup — используется во всех запросах к WB
+const WB_AGENT = new https.Agent({ lookup: wbLookup, keepAlive: true });
+
+console.log('[wb-auth] Custom DNS agent initialized (Google 8.8.8.8 / Cloudflare 1.1.1.1)');
 
 // Эндпоинты авторизации WB (пробуем по очереди если основной недоступен)
 const WB_AUTH_ENDPOINTS = [
@@ -40,7 +67,7 @@ async function requestSmsCode(phone) {
       const res = await axios.post(
         `${base}/login_by_phone`,
         { phone: cleanPhone, is_terms_and_conditions_accepted: true },
-        { headers: BROWSER_HEADERS, timeout: 12000, validateStatus: s => s < 500 }
+        { headers: BROWSER_HEADERS, timeout: 12000, httpsAgent: WB_AGENT, validateStatus: s => s < 500 }
       );
 
       const status = res.status;
@@ -100,6 +127,7 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
       {
         headers:          BROWSER_HEADERS,
         timeout:          15000,
+        httpsAgent:       WB_AGENT,
         withCredentials:  true,
         // Важно — читаем Set-Cookie из ответа
         validateStatus:   s => s < 500,
@@ -179,6 +207,7 @@ async function fetchAuthorizev3(sessionCookies) {
           Cookie: sessionCookies,
         },
         timeout: 10000,
+        httpsAgent: WB_AGENT,
         validateStatus: s => s < 500,
       });
       const token = res.data?.token || res.data?.accessToken

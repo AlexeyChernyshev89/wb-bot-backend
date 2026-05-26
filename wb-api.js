@@ -4,7 +4,20 @@
 // Авторизация: Authorization: Bearer <token>
 // Лимит: 300 запросов/минуту для категории Marketplace
 
-const axios = require('axios');
+const axios  = require('axios');
+const dns    = require('dns');
+const https  = require('https');
+
+// Кастомный DNS — Google/Cloudflare для резолва .ru доменов
+const _resolver = new dns.Resolver();
+_resolver.setServers(['8.8.8.8', '1.1.1.1']);
+function _lookup(h, o, cb) {
+  _resolver.resolve4(h, (e, a) => {
+    if (!e && a && a.length) return cb(null, a[0], 4);
+    dns.lookup(h, o, cb);
+  });
+}
+const WB_AGENT = new https.Agent({ lookup: _lookup, keepAlive: true });
 
 const WB_MARKETPLACE_API = 'https://marketplace-api.wildberries.ru';
 const WB_CONTENT_API     = 'https://content-api.wildberries.ru';
@@ -24,7 +37,8 @@ async function apiRequest(method, baseUrl, path, token, data = null, params = nu
       },
       data,
       params,
-      timeout: 15000
+      timeout: 15000,
+      httpsAgent: WB_AGENT,
     });
     return response.data;
   } catch (error) {
@@ -224,10 +238,64 @@ async function getArticleByNmId(token, nmId) {
  * Поля ответа: warehouseName, nmId, quantity (доступно к продаже),
  *              quantityFull (полный остаток включая в пути), inWayToClient, inWayFromClient.
  */
-async function getFboStocksRaw(token) {
-  // dateFrom=2019-01-01 — получаем полный актуальный снимок остатков
-  return apiRequest('GET', WB_STATISTICS_API,
-    '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
+async function getFboStocksRaw(token, nmIds = null) {
+  const WB_ANALYTICS_API = 'https://analytics-api.wildberries.ru';
+
+  // === Попытка 1: Новый Analytics API (добавлен 23.03.2026) ===
+  // POST /api/analytics/v1/stocks-report/wb-warehouses
+  // Токен: категория Analytics. Лимит: 1 запрос / 20 сек, до 250 000 строк.
+  try {
+    const body = { pagination: { limit: 250000, offset: 0 } };
+    if (nmIds && nmIds.length > 0) body.filter = { nmIDs: nmIds };
+
+    const response = await apiRequest('POST', WB_ANALYTICS_API,
+      '/api/analytics/v1/stocks-report/wb-warehouses', token, body);
+
+    const rows = response?.data || response?.stocks || [];
+    console.log(`[FBO stocks] Analytics API: ${rows.length} строк`);
+    return rows;
+
+  } catch (analyticsErr) {
+    console.warn(`[FBO stocks] Analytics API (${analyticsErr.status || analyticsErr.message}), fallback → Statistics API...`);
+
+    // === Fallback: Statistics API — ОТКЛЮЧАЕТСЯ 23.06.2026 ===
+    try {
+      const data = await apiRequest('GET', WB_STATISTICS_API,
+        '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
+      const rows = Array.isArray(data) ? data : [];
+      console.log(`[FBO stocks] Statistics fallback: ${rows.length} строк`);
+      return rows;
+    } catch (statErr) {
+      console.error(`[FBO stocks] Оба API недоступны`);
+      throw new Error(
+        'Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.'
+      );
+    }
+  }
+}
+
+/**
+ * Получить список уникальных WB FBO складов из Statistics API.
+ * Возвращает массив названий складов WB (не собственные склады продавца).
+ */
+async function getWbFboWarehouseNames(token) {
+  try {
+    const allStocks = await getFboStocksRaw(token);
+    const rows = Array.isArray(allStocks) ? allStocks : [];
+    // Фильтруем системные строки (в пути, возвраты) — берём только реальные склады
+    const excluded = ['в пути', 'in transit', 'возврат', 'return', 'к клиенту', 'от клиента'];
+    const names = new Set();
+    for (const item of rows) {
+      const wh = (item.warehouseName || '').trim();
+      if (!wh) continue;
+      const isSystem = excluded.some(ex => wh.toLowerCase().includes(ex));
+      if (!isSystem) names.add(wh);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, 'ru'));
+  } catch(err) {
+    console.warn('[getWbFboWarehouseNames] Statistics API error:', err.message);
+    return [];
+  }
 }
 
 /**
@@ -303,8 +371,91 @@ async function getArticleStocks(token, nmId) {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INTERNAL WB SELLER SUPPLY API (имитация браузерной сессии)
+// Используется @WBSupplyHelperBot и аналогами для FBO перемещений.
+// Заголовок: Authorizev3 (сессионный JWT из ЛК продавца, НЕ API-токен)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const WB_SELLER_SUPPLY = 'https://seller-supply.wildberries.ru';
+const TRANSFER_PATH    = '/ns/goods-return/supply-manager/api/v1/transfer';
+
+/**
+ * Базовый POST к внутреннему API seller-supply.wildberries.ru
+ */
+async function sellerSupplyPost(sessionToken, endpoint, body = {}) {
+  try {
+    const res = await axios.post(
+      `${WB_SELLER_SUPPLY}${TRANSFER_PATH}${endpoint}`,
+      body,
+      {
+        headers: {
+          Authorizev3:      sessionToken,
+          'Content-Type':   'application/json',
+          Accept:           '*/*',
+          Origin:           'https://seller.wildberries.ru',
+          Referer:          'https://seller.wildberries.ru/stock-control',
+          'User-Agent':     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept-Language':'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        data: body,
+        timeout: 15000,
+      }
+    );
+    return res.data;
+  } catch (err) {
+    const status = err.response?.status;
+    const detail = err.response?.data;
+    console.error(`[seller-supply] ${endpoint} → ${status}:`, JSON.stringify(detail));
+    const e = new Error(
+      detail?.message || detail?.error || detail?.detail || `Ошибка seller-supply API ${status}`
+    );
+    e.status = status;
+    e.wbDetail = detail;
+    if (status === 401 || status === 403) e.sessionExpired = true;
+    throw e;
+  }
+}
+
+/**
+ * Получить список складов с доступными лимитами для артикула.
+ * POST /transfer/AvailableLimits
+ * Возвращает: массив складов с полями officeId, officeName, available (bool), qty
+ */
+async function getTransferAvailableLimits(sessionToken, nmId) {
+  return sellerSupplyPost(sessionToken, '/AvailableLimits', { nmId: Number(nmId) });
+}
+
+/**
+ * Создать запрос на FBO-перемещение товара между складами WB.
+ * POST /transfer
+ * @param {string} sessionToken - Authorizev3 JWT из ЛК продавца
+ * @param {number} nmId         - Артикул WB (nmId)
+ * @param {number} fromOfficeId - ID склада-источника (из AvailableLimits)
+ * @param {number} toOfficeId   - ID склада-назначения
+ * @param {number} amount       - Количество единиц
+ */
+async function createWbTransfer(sessionToken, { nmId, fromOfficeId, toOfficeId, amount }) {
+  return sellerSupplyPost(sessionToken, '', {
+    nmId:         Number(nmId),
+    fromOfficeId: Number(fromOfficeId),
+    toOfficeId:   Number(toOfficeId),
+    amount:       Number(amount),
+  });
+}
+
+/**
+ * Список текущих активных перемещений.
+ * POST /transfer/list
+ */
+async function getWbTransferList(sessionToken) {
+  return sellerSupplyPost(sessionToken, '/list', {});
+}
+
 module.exports = {
   getWarehouses, getStocks, updateStocks, deleteStocks,
   getCardsList, getAllCards, extractSkusFromCards,
-  getArticleByNmId, getArticleStocks, getFboStocksRaw
+  getArticleByNmId, getArticleStocks, getFboStocksRaw, getWbFboWarehouseNames,
+  getTransferAvailableLimits, createWbTransfer, getWbTransferList
 };
