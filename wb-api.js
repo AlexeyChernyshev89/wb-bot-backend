@@ -8,16 +8,14 @@ const axios  = require('axios');
 const dns    = require('dns');
 const https  = require('https');
 
-// Кастомный DNS — Google/Cloudflare для резолва .ru доменов
-const _resolver = new dns.Resolver();
-_resolver.setServers(['8.8.8.8', '1.1.1.1']);
-function _lookup(h, o, cb) {
-  _resolver.resolve4(h, (e, a) => {
-    if (!e && a && a.length) return cb(null, a[0], 4);
-    dns.lookup(h, o, cb);
-  });
+// Принудительный IPv4 для WB API — Railway EU использует IPv6 по умолчанию,
+// но WB API (marketplace-api.wildberries.ru) не принимает IPv6.
+// Кастомный lookup: всегда возвращает IPv4 адрес.
+function _ipv4Lookup(hostname, options, callback) {
+  dns.lookup(hostname, { ...options, family: 4 }, callback);
 }
-const WB_AGENT = new https.Agent({ lookup: _lookup, keepAlive: true });
+const WB_AGENT = new https.Agent({ lookup: _ipv4Lookup, keepAlive: false });
+console.log('[wb-api] IPv4-only HTTPS agent initialized');
 
 const WB_MARKETPLACE_API = 'https://marketplace-api.wildberries.ru';
 const WB_CONTENT_API     = 'https://content-api.wildberries.ru';
@@ -38,7 +36,7 @@ async function apiRequest(method, baseUrl, path, token, data = null, params = nu
       data,
       params,
       timeout: 15000,
-      httpsAgent: WB_AGENT,
+      httpsAgent: WB_AGENT,   // принудительный IPv4 — WB API не принимает IPv6
     });
     return response.data;
   } catch (error) {

@@ -27,17 +27,28 @@ function wbLookup(hostname, options, callback) {
   });
 }
 
-// HTTPS-агент с кастомным lookup — используется во всех запросах к WB
-const WB_AGENT = new https.Agent({ lookup: wbLookup, keepAlive: true });
+// HTTPS-агент: кастомный DNS + принудительный IPv4
+// Railway EU использует IPv6, но WB auth API не принимает IPv6
+const WB_AGENT = new https.Agent({ lookup: wbLookup, keepAlive: false, family: 4 });
 
 console.log('[wb-auth] Custom DNS agent initialized (Google 8.8.8.8 / Cloudflare 1.1.1.1)');
 
-// Эндпоинты авторизации WB (пробуем по очереди если основной недоступен)
+// Эндпоинты авторизации WB
+// Если задана переменная WB_AUTH_PROXY (Cloudflare Worker) — используем её первой:
+// Railway не может резолвить .ru домены напрямую, но Cloudflare Worker может.
+// Деплой прокси: см. cloudflare-worker.js в репозитории
+const WB_AUTH_PROXY = process.env.WB_AUTH_PROXY || '';
+
 const WB_AUTH_ENDPOINTS = [
+  // 1. Cloudflare Worker прокси (если задан в env)
+  ...(WB_AUTH_PROXY ? [WB_AUTH_PROXY + '/passport/api/v2/auth'] : []),
+  // 2. Прямые WB эндпоинты (работают если DNS резолвится)
   'https://content-suppliers.wildberries.ru/passport/api/v2/auth',
   'https://seller.wildberries.ru/passport/api/v2/auth',
   'https://passport.wildberries.ru/api/v2/auth',
 ];
+
+console.log('[wb-auth] Auth endpoints:', WB_AUTH_ENDPOINTS.length, WB_AUTH_PROXY ? '(proxy: ' + WB_AUTH_PROXY + ')' : '(no proxy)');
 
 // Общие заголовки — имитируем браузер на seller.wildberries.ru
 const BROWSER_HEADERS = {
