@@ -705,6 +705,35 @@ app.post('/auth/request-sms-v2', telegramAuth, requireDB, async (req, res) => {
       'Accept-Language': 'ru-RU,ru;q=0.9',
     };
 
+    // Используем Yandex Cloud Function (российский IP) если задан YANDEX_FN_URL
+    const YANDEX_FN = process.env.YANDEX_FN_URL || '';
+    if (YANDEX_FN) {
+      console.log('[request-sms-v2] Using Yandex Function:', YANDEX_FN);
+      try {
+        const fnRes = await axios.post(YANDEX_FN,
+          { action: 'send-sms', phone },
+          { timeout: 20000, validateStatus: s => s < 600 }
+        );
+        console.log('[request-sms-v2] Yandex fn result:', fnRes.data?.status, fnRes.data?.success);
+        if (fnRes.data?.success) {
+          await db.query(
+            `INSERT INTO sms_requests (telegram_id, phone, request_token, created_at)
+             VALUES ($1, $2, $3, NOW()) ON CONFLICT (telegram_id)
+             DO UPDATE SET phone=$2, request_token=$3, created_at=NOW()`,
+            [req.telegramId, phone, 'yafn:' + phone]
+          );
+          return res.json({ success: true, message: 'SMS отправлен на ' + phone });
+        }
+        if (fnRes.data?.status === 498) {
+          // Нужен fingerprint — вернём challenge клиенту (реализуем позже)
+          console.log('[request-sms-v2] Yandex fn: need fingerprint challenge');
+        }
+        // Fallback — продолжаем ниже
+      } catch(e) {
+        console.warn('[request-sms-v2] Yandex fn error:', e.message, '— fallback');
+      }
+    }
+
     // Шаг 1: Получаем cfidsw-wb и другие cookie от WB login-страницы
     let wbCookieStr = '';
     try {
