@@ -631,14 +631,60 @@ app.post('/auth/request-sms-v2', telegramAuth, requireDB, async (req, res) => {
       'Accept-Language': 'ru-RU,ru;q=0.9',
     };
 
-    // Прямой вызов wb-captcha с пустым captcha_token
-    // Подтверждено: WB возвращает 200 OK и отправляет SMS с captcha_token=""
-    console.log('[request-sms-v2] Calling wb-captcha for phone:', phone);
+    // Шаг 1: Получаем cfidsw-wb и другие cookie от WB login-страницы
+    let wbCookieStr = '';
+    try {
+      const initPages = [
+        'https://seller-auth.wildberries.ru/ru/',
+        'https://seller.wildberries.ru/',
+      ];
+      for (const url of initPages) {
+        const initR = await axios.get(url, {
+          headers: { 'User-Agent': headers['User-Agent'], 'Accept': 'text/html,*/*', 'Accept-Language': 'ru-RU,ru;q=0.9' },
+          httpsAgent: agent, timeout: 8000, maxRedirects: 3, validateStatus: s => s < 600,
+        });
+        const cookies = (initR.headers['set-cookie'] || []).map(s => s.split(';')[0]).join('; ');
+        if (cookies.includes('cfidsw') || cookies.includes('wbx-validation')) {
+          wbCookieStr = cookies;
+          console.log('[request-sms-v2] Got cookies from', url, ':', cookies.substring(0, 120));
+          break;
+        }
+        if (cookies.length > 0 && !wbCookieStr) wbCookieStr = cookies;
+      }
+    } catch(e) { console.warn('[request-sms-v2] cookie fetch error:', e.message); }
+
+    // Шаг 2: Пробуем antibot с полученными cookie
+    let captchaToken = '';
+    if (wbCookieStr) {
+      try {
+        const antibotHeaders = {
+          ...headers,
+          Cookie: wbCookieStr,
+          Origin: 'https://seller-auth.wildberries.ru',
+          Referer: 'https://seller-auth.wildberries.ru/ru/',
+        };
+        const abR = await axios.post(
+          'https://antibot.wildberries.ru/api/v1/create-one-time-token',
+          { payload: '' },
+          { headers: antibotHeaders, httpsAgent: agent, timeout: 10000, validateStatus: s => s < 600 }
+        );
+        console.log('[request-sms-v2] antibot status:', abR.status, JSON.stringify(abR.data).substring(0, 100));
+        if (abR.status === 200) {
+          captchaToken = abR.data.token || abR.data.one_time_token || '';
+          console.log('[request-sms-v2] Got captchaToken:', captchaToken.substring(0, 30));
+        }
+        // 498 = нужен fingerprint (мы пока пропускаем, браузер должен собрать)
+      } catch(e) { console.warn('[request-sms-v2] antibot error:', e.message); }
+    }
+
+    // Шаг 3: Вызываем wb-captcha
+    console.log('[request-sms-v2] Calling wb-captcha for phone:', phone, '| captchaToken:', captchaToken ? 'YES' : 'EMPTY');
 
     const smsR = await axios.post(
       'https://seller-auth.wildberries.ru/auth/v2/code/wb-captcha',
-      { phone_number: phone, captcha_token: '' },
-      { headers, httpsAgent: agent, timeout: 15000, validateStatus: s => s < 600 }
+      { phone_number: phone, captcha_token: captchaToken },
+      { headers: { ...headers, ...(wbCookieStr ? { Cookie: wbCookieStr } : {}) },
+        httpsAgent: agent, timeout: 15000, validateStatus: s => s < 600 }
     );
 
     console.log('[request-sms-v2] wb-captcha status:', smsR.status,
