@@ -606,11 +606,12 @@ app.post('/auth/antibot-challenge', telegramAuth, async (req, res) => {
 
 /**
  * POST /auth/request-sms-v2
- * Финальный шаг: принимает fingerprint от браузера,
- * обменивает у антибота на token, отправляет SMS через wb-captcha.
+ * Отправляет SMS через seller-auth.wildberries.ru/auth/v2/code/wb-captcha
+ * captcha_token="" — WB принимает пустой токен (подтверждено DevTools: 200 OK)
+ * antibot пропускается — он требует WB-cookies которых у нас нет
  */
 app.post('/auth/request-sms-v2', telegramAuth, requireDB, async (req, res) => {
-  const { phone, fingerprint } = req.body;
+  const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'phone required' });
 
   try {
@@ -620,54 +621,60 @@ app.post('/auth/request-sms-v2', telegramAuth, requireDB, async (req, res) => {
 
     function ipv4Lookup(h, o, cb) { dns.lookup(h, { ...o, family: 4 }, cb); }
     const agent = new https.Agent({ lookup: ipv4Lookup, keepAlive: false });
+
     const headers = {
       'Content-Type':  'application/json',
-      'Accept':        'application/json',
-      'User-Agent':    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Origin':        'https://seller.wildberries.ru',
-      'Referer':       'https://seller.wildberries.ru/',
+      'Accept':        'application/json, text/plain, */*',
+      'User-Agent':    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Origin':        'https://seller-auth.wildberries.ru',
+      'Referer':       'https://seller-auth.wildberries.ru/ru/',
+      'Accept-Language': 'ru-RU,ru;q=0.9',
     };
 
-    let captchaToken = '';
+    // Прямой вызов wb-captcha с пустым captcha_token
+    // Подтверждено: WB возвращает 200 OK и отправляет SMS с captcha_token=""
+    console.log('[request-sms-v2] Calling wb-captcha for phone:', phone);
 
-    // Шаг A: если есть fingerprint — обмениваем на token
-    if (fingerprint) {
-      try {
-        const r2 = await axios.post(
-          'https://antibot.wildberries.ru/api/v1/create-one-time-token',
-          { payload: fingerprint },
-          { headers, httpsAgent: agent, timeout: 10000, validateStatus: s => s < 600 }
-        );
-        console.log('[request-sms-v2] antibot with fp:', r2.status, JSON.stringify(r2.data).substring(0, 80));
-        if (r2.status === 200) {
-          captchaToken = r2.data.token || r2.data.one_time_token || r2.data.captchaToken || '';
-        }
-      } catch(e) {
-        console.warn('[request-sms-v2] antibot with fp error:', e.message);
-      }
-    }
-
-    // Шаг B: отправляем SMS через seller-auth (новый endpoint!)
     const smsR = await axios.post(
       'https://seller-auth.wildberries.ru/auth/v2/code/wb-captcha',
-      { phone_number: phone, captcha_token: captchaToken },
+      { phone_number: phone, captcha_token: '' },
       { headers, httpsAgent: agent, timeout: 15000, validateStatus: s => s < 600 }
     );
 
-    console.log('[request-sms-v2] wb-captcha:', smsR.status, JSON.stringify(smsR.data).substring(0, 100));
+    console.log('[request-sms-v2] wb-captcha status:', smsR.status,
+                '| body:', JSON.stringify(smsR.data).substring(0, 150));
 
     if (smsR.status === 200 || smsR.status === 204) {
-      // Сохраняем для верификации
       await db.query(
         `INSERT INTO sms_requests (telegram_id, phone, request_token, created_at)
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (telegram_id) DO UPDATE SET phone=$2, request_token=$3, created_at=NOW()`,
-        [req.telegramId, phone, 'wbcaptcha:' + phone + ':' + captchaToken]
+        [req.telegramId, phone, 'wbcaptcha:' + phone]
       );
       return res.json({ success: true, message: 'SMS отправлен на ' + phone });
     }
 
-    const errMsg = smsR.data?.message || smsR.data?.error || 'WB вернул ' + smsR.status;
+    // Если 401/403 — пробуем старый endpoint как fallback
+    console.log('[request-sms-v2] wb-captcha failed, trying legacy endpoint...');
+    const fallR = await axios.post(
+      'https://seller.wildberries.ru/passport/api/v2/auth/login_by_phone',
+      { phone, is_terms_and_conditions_accepted: true },
+      { headers: { ...headers, Origin: 'https://seller.wildberries.ru', Referer: 'https://seller.wildberries.ru/' },
+        httpsAgent: agent, timeout: 15000, validateStatus: s => s < 600 }
+    );
+    console.log('[request-sms-v2] legacy endpoint:', fallR.status);
+
+    if (fallR.status === 200 || fallR.status === 204) {
+      await db.query(
+        `INSERT INTO sms_requests (telegram_id, phone, request_token, created_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (telegram_id) DO UPDATE SET phone=$2, request_token=$3, created_at=NOW()`,
+        [req.telegramId, phone, 'legacy:' + phone]
+      );
+      return res.json({ success: true, message: 'SMS отправлен на ' + phone });
+    }
+
+    const errMsg = (smsR.data?.message || smsR.data?.error || 'WB вернул ' + smsR.status);
     res.status(400).json({ success: false, error: errMsg });
 
   } catch(err) {
