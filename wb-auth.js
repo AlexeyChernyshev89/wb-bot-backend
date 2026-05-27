@@ -58,37 +58,57 @@ const BROWSER_HEADERS = {
 
 
 /**
- * Получить начальные cookies от seller.wildberries.ru
- * WB проверяет наличие session cookies (wbx-validation-key и др.)
- * перед отправкой SMS — без них принимает запрос но SMS не шлёт.
+ * Сгенерировать UUID v4 (формат wbx-validation-key)
+ */
+function uuidv4() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+/**
+ * Получить/сформировать cookies для WB auth запроса.
+ * WB проверяет наличие wbx-validation-key перед отправкой SMS.
+ * Пробуем:
+ * 1. Получить реальные cookies через GET seller.wildberries.ru
+ * 2. Если нет — добавляем обязательные cookies вручную
  */
 async function getWbSessionCookies() {
-  const urls = [
-    'https://seller.wildberries.ru/',
-    'https://seller.wildberries.ru/login',
-  ];
-  for (const url of urls) {
-    try {
-      const res = await axios.get(url, {
-        headers: {
-          'User-Agent':     BROWSER_HEADERS['User-Agent'],
-          'Accept':         'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language':'ru-RU,ru;q=0.9,en-US;q=0.8',
-          'Accept-Encoding':'gzip, deflate, br',
-        },
-        httpsAgent: WB_AGENT,
-        timeout:    10000,
-        maxRedirects: 5,
-      });
-      const setCookies = res.headers['set-cookie'] || [];
-      const cookieStr  = setCookies.map(c => c.split(';')[0]).join('; ');
-      console.log('[wb-auth] Got cookies from', url, ':', cookieStr.substring(0, 120));
-      if (cookieStr.length > 0) return cookieStr;
-    } catch(e) {
-      console.warn('[wb-auth] Could not get cookies from', url, ':', e.message);
-    }
+  let cookieStr = '';
+
+  // Пробуем получить реальные cookies
+  try {
+    const res = await axios.get('https://seller.wildberries.ru/', {
+      headers: {
+        'User-Agent':     BROWSER_HEADERS['User-Agent'],
+        'Accept':         'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language':'ru-RU,ru;q=0.9,en-US;q=0.8',
+      },
+      httpsAgent:   WB_AGENT,
+      timeout:      8000,
+      maxRedirects: 3,
+    });
+    const setCookies = res.headers['set-cookie'] || [];
+    cookieStr = setCookies.map(c => c.split(';')[0]).join('; ');
+    console.log('[wb-auth] Real cookies:', cookieStr.substring(0, 150));
+  } catch(e) {
+    console.warn('[wb-auth] Could not GET seller.wildberries.ru:', e.message);
   }
-  return '';
+
+  // Добавляем/заменяем обязательные ключи если их нет
+  const needsValidationKey = !cookieStr.includes('wbx-validation-key');
+  if (needsValidationKey) {
+    const validationKey = uuidv4();
+    console.log('[wb-auth] Generating wbx-validation-key:', validationKey);
+    cookieStr = [
+      cookieStr,
+      `wbx-validation-key=${validationKey}`,
+    ].filter(Boolean).join('; ');
+  }
+
+  console.log('[wb-auth] Final cookies:', cookieStr.substring(0, 200));
+  return cookieStr;
 }
 
 /**
