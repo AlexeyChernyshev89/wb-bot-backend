@@ -556,6 +556,80 @@ app.post('/auth/save-sms-state', telegramAuth, requireDB, async (req, res) => {
   }
 });
 
+// ─── DEBUG: тест antibot с разными заголовками ─────────────────────────────
+app.post('/debug-antibot', async (req, res) => {
+  const axios = require('axios');
+  const https  = require('https');
+  const dns    = require('dns');
+  function ipv4(h, o, cb) { dns.lookup(h, { ...o, family: 4 }, cb); }
+  const agent = new https.Agent({ lookup: ipv4, keepAlive: false });
+
+  const results = {};
+
+  // Вариант 1: без Origin/Referer (как нативное приложение)
+  try {
+    const r1 = await axios.post(
+      'https://antibot.wildberries.ru/api/v1/create-one-time-token',
+      { payload: '' },
+      { headers: { 'Content-Type': 'application/json', 'User-Agent': 'WBPartner/2.0 (Android)' },
+        httpsAgent: agent, timeout: 8000, validateStatus: s => s < 600 }
+    );
+    results.no_origin = { status: r1.status, data: JSON.stringify(r1.data).substring(0, 100) };
+  } catch(e) { results.no_origin = { error: e.message }; }
+
+  // Вариант 2: мобильное приложение WB
+  try {
+    const r2 = await axios.post(
+      'https://antibot.wildberries.ru/api/v1/create-one-time-token',
+      { payload: '' },
+      { headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'okhttp/4.12.0',
+          'x-app-name': 'seller',
+          'x-app-version': '2.0',
+        },
+        httpsAgent: agent, timeout: 8000, validateStatus: s => s < 600 }
+    );
+    results.mobile_app = { status: r2.status, data: JSON.stringify(r2.data).substring(0, 100) };
+  } catch(e) { results.mobile_app = { error: e.message }; }
+
+  // Вариант 3: с Origin seller-auth
+  try {
+    const r3 = await axios.post(
+      'https://antibot.wildberries.ru/api/v1/create-one-time-token',
+      { payload: '' },
+      { headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0',
+          'Origin': 'https://seller-auth.wildberries.ru',
+          'Referer': 'https://seller-auth.wildberries.ru/ru/',
+        },
+        httpsAgent: agent, timeout: 8000, validateStatus: s => s < 600 }
+    );
+    results.seller_auth_origin = { status: r3.status, data: JSON.stringify(r3.data).substring(0, 100) };
+  } catch(e) { results.seller_auth_origin = { error: e.message }; }
+
+  // Вариант 4: получаем cfidsw-wb из seller-services
+  try {
+    const uuid = require('crypto').randomUUID();
+    const r4 = await axios.post(
+      `https://seller-services.wildberries.ru/sec/api/fl?u=${uuid}&cfidsw-wb=`,
+      {},
+      { headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0',
+          'Origin': 'https://seller.wildberries.ru',
+        },
+        httpsAgent: agent, timeout: 8000, validateStatus: s => s < 600 }
+    );
+    const cookies = (r4.headers['set-cookie'] || []).map(s => s.split(';')[0]).join('; ');
+    results.seller_services = { status: r4.status, cookies, data: JSON.stringify(r4.data).substring(0, 80) };
+  } catch(e) { results.seller_services = { error: e.message }; }
+
+  console.log('[debug-antibot]', JSON.stringify(results, null, 2));
+  res.json(results);
+});
+
+
 /**
  * POST /auth/antibot-challenge
  * Сервер запрашивает challenge у WB antibot (без CORS ограничений браузера).
