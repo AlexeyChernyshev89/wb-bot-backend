@@ -325,68 +325,41 @@
   <div class="auth-wrap">
     <div class="auth-logo">🛒</div>
     <div class="auth-title">WB Supply Helper</div>
-    <div class="auth-sub">Подключите аккаунт Wildberries для автоматического бронирования</div>
+    <div class="auth-sub">Автоматическое бронирование перемещений между складами Wildberries</div>
 
-    <!-- Способ 1: SMS (работает только с российского IP) -->
-    <div id="authMethodSms" style="margin-bottom:16px">
-      <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">
-        Способ 1 — Вход через SMS
-      </div>
-      <div id="authPhoneStep">
-        <input type="tel" id="authPhone" class="inp"
-          placeholder="+7 (999) 123-45-67"
-          inputmode="tel" style="margin-bottom:8px" />
-        <div id="authPhoneMsg" class="msg"></div>
-        <button class="btn btn-accent" id="authPhoneBtn" onclick="authSendSms()">
-          📲 Получить SMS-код
-        </button>
-      </div>
-      <div id="authCodeStep" style="display:none">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:10px;text-align:center">
-          Код отправлен на <b id="authPhoneDisplay" style="color:var(--text)"></b>
-        </p>
-        <input type="text" id="authCode" class="inp"
-          placeholder="123456" inputmode="numeric" maxlength="6"
-          style="letter-spacing:10px;font-size:28px;text-align:center;margin-bottom:8px" />
-        <div id="authCodeMsg" class="msg"></div>
-        <button class="btn btn-accent" id="authCodeBtn" onclick="authVerifySms()">✅ Подтвердить</button>
-        <button class="btn btn-surface" onclick="authResetPhone()" style="margin-top:6px">← Изменить номер</button>
-      </div>
-    </div>
-
-    <div style="display:flex;align-items:center;gap:10px;margin:12px 0">
-      <div style="flex:1;height:1px;background:var(--border)"></div>
-      <span style="font-size:12px;color:var(--text2)">или</span>
-      <div style="flex:1;height:1px;background:var(--border)"></div>
-    </div>
-
-    <!-- Способ 2: Authorizev3 токен -->
-    <div id="authMethodToken">
-      <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">
-        Способ 2 — Токен из браузера
+    <div id="authPhoneStep">
+      <div class="steps-box" style="margin-bottom:20px">
+        <div class="steps-box-title">Как войти</div>
+        <div class="step-item"><div class="step-num">1</div><span>Введите номер телефона от аккаунта <b style="color:var(--text)">продавца WB</b></span></div>
+        <div class="step-item"><div class="step-num">2</div><span>Получите SMS-код и введите его</span></div>
+        <div class="step-item"><div class="step-num">3</div><span>Готово — бот будет автоматически бронировать квоты</span></div>
       </div>
 
-      <div class="steps-box" style="margin-bottom:12px">
-        <div class="step-item"><div class="step-num">1</div><span>Откройте <b style="color:var(--accent)" onclick="openWbSite()" style="cursor:pointer">seller.wildberries.ru</b> → войдите в аккаунт</span></div>
-        <div class="step-item"><div class="step-num">2</div><span>Перейдите в <b style="color:var(--text)">Управление остатками</b></span></div>
-        <div class="step-item"><div class="step-num">3</div><span><b style="color:var(--text)">F12</b> → Network → любой запрос к <b style="color:var(--accent)">seller-supply.wildberries.ru</b></span></div>
-        <div class="step-item"><div class="step-num">4</div><span>Headers → скопируйте значение <b style="color:var(--accent)">Authorizev3</b></span></div>
-      </div>
-
-      <button class="btn btn-surface" onclick="openWbSite()" style="margin-bottom:10px">
-        🌐 Открыть seller.wildberries.ru
+      <label class="field-label">Номер телефона продавца WB</label>
+      <input type="tel" id="authPhone" class="inp"
+        placeholder="+7 (999) 123-45-67"
+        inputmode="tel" style="margin-bottom:8px" />
+      <div id="authPhoneMsg" class="msg"></div>
+      <button class="btn btn-accent" id="authPhoneBtn" onclick="authSendSms()">
+        📲 Получить SMS-код
       </button>
+    </div>
 
-      <div style="position:relative;margin-bottom:4px">
-        <input type="password" id="authTokenInput" class="inp"
-          placeholder="eyJhbGciOiJFUzI1NiIsInR5cCI6Ikp..."
-          autocomplete="off" style="padding-right:44px;font-size:12px" />
-        <button onclick="toggleAuthTokenVis()" id="authTokenEye"
-          style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text2);font-size:16px;cursor:pointer">👁</button>
-      </div>
-      <div id="authTokenMsg" class="msg"></div>
-      <button class="btn btn-accent" id="authTokenBtn" onclick="submitAuthToken()" style="margin-top:8px">
-        ✅ Подключить
+    <div id="authCodeStep" style="display:none">
+      <p style="text-align:center;font-size:14px;color:var(--text2);margin-bottom:20px">
+        Код отправлен на<br>
+        <b id="authPhoneDisplay" style="color:var(--text);font-size:16px"></b>
+      </p>
+      <label class="field-label">Код из SMS</label>
+      <input type="text" id="authCode" class="inp"
+        placeholder="123456" inputmode="numeric" maxlength="6"
+        style="letter-spacing:10px;font-size:28px;text-align:center;margin-bottom:8px" />
+      <div id="authCodeMsg" class="msg"></div>
+      <button class="btn btn-accent" id="authCodeBtn" onclick="authVerifySms()">
+        ✅ Подтвердить
+      </button>
+      <button class="btn btn-surface" onclick="authResetPhone()" style="margin-top:8px">
+        ← Изменить номер
       </button>
     </div>
   </div>
@@ -837,129 +810,86 @@ async function authSendSms() {
   const phone = (document.getElementById('authPhone').value || '').trim();
   const btn   = document.getElementById('authPhoneBtn');
   const msgEl = document.getElementById('authPhoneMsg');
-  if (msgEl) { msgEl.style.display = 'none'; msgEl.className = 'msg'; }
+  if (msgEl) { msgEl.style.display='none'; msgEl.className='msg'; }
 
   if (!phone) {
     if (msgEl) { msgEl.style.display='block'; msgEl.className='msg msg-error show'; msgEl.textContent='Введите номер телефона'; }
     return;
   }
 
-  // Нормализация номера: WB принимает 79XXXXXXXXX (без +, без 8)
-  const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
-  let phoneNum = cleanPhone.startsWith('+') ? cleanPhone.slice(1) : cleanPhone;
+  let phoneNum = phone.replace(/[\s\-\(\)]/g, '');
+  if (phoneNum.startsWith('+')) phoneNum = phoneNum.slice(1);
   if (phoneNum.startsWith('8') && phoneNum.length === 11) phoneNum = '7' + phoneNum.slice(1);
 
   btn.innerHTML = '<span class="spinner"></span> Получаем токен...';
   btn.disabled = true;
 
   try {
-    const ANTIBOT = 'https://antibot.wildberries.ru/api/v1/create-one-time-token';
+    // Шаг 1: Сервер запрашивает challenge у антибота (без CORS проблем)
+    const challengeRes = await api('POST', '/auth/antibot-challenge', {});
+    const challenge = challengeRes.challenge || {};
+    const scriptPath = challenge.scriptPath || '/statics/challenge_fingerprint_v1.0.23.js';
+    const challengePayload = challenge.payload || '';
+    console.log('[SMS] Got challenge, scriptPath:', scriptPath);
 
-    // Шаг 1: Запрашиваем challenge у антибота
-    const r1 = await fetch(ANTIBOT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payload: '' })
+    btn.innerHTML = '<span class="spinner"></span> Загрузка...';
+
+    // Шаг 2: Загружаем fingerprint-скрипт через <script src> (CORS не применяется к script tags)
+    await new Promise((res, rej) => {
+      if (document.querySelector('script[data-wb-fp]')) { res(); return; }
+      const s = document.createElement('script');
+      s.src = 'https://antibot.wildberries.ru' + scriptPath;
+      s.setAttribute('data-wb-fp', '1');
+      s.onload = res;
+      s.onerror = () => { console.warn('[SMS] script load failed, continuing anyway'); res(); };
+      document.head.appendChild(s);
     });
 
-    let captchaToken = '';
+    await new Promise(r => setTimeout(r, 500));
 
-    if (r1.status === 498) {
-      const body1 = await r1.json();
-      // !!!ВАЖНО: challenge вложен в body.challenge, не в body напрямую!!!
-      const ch = body1.challenge || {};
-      const scriptPath = ch.scriptPath || '/statics/challenge_fingerprint_v1.0.23.js';
-      const challengePayload = ch.payload || '';
-      console.log('[SMS] challenge scriptPath:', scriptPath);
+    btn.innerHTML = '<span class="spinner"></span> Сбор данных...';
 
-      btn.innerHTML = '<span class="spinner"></span> Загрузка fingerprint...';
+    // Шаг 3: Вычисляем Symbol key — hash("challenge_fingerprint_v1.0.23")
+    const libStr = 'challenge_fingerprint_v1.0.23';
+    let hashVal = 0;
+    for (let i = 0; i < libStr.length; i++) {
+      hashVal = ((hashVal << 5) - hashVal + libStr.charCodeAt(i)) | 0;
+    }
+    const symDesc = String(Math.abs(hashVal));
 
-      // Шаг 2: Загружаем fingerprint-скрипт и выполняем его
-      await new Promise((res, rej) => {
-        const s = document.createElement('script');
-        s.src = 'https://antibot.wildberries.ru' + scriptPath;
-        s.onload = res;
-        s.onerror = rej;
-        document.head.appendChild(s);
-      });
-
-      // Ждём инициализации Bo() — она происходит синхронно при загрузке
-      await new Promise(r => setTimeout(r, 300));
-
-      btn.innerHTML = '<span class="spinner"></span> Сбор данных...';
-
-      // Шаг 3: Вычисляем Symbol key: hash("challenge_fingerprint_v1.0.23")
-      // Алгоритм из исходника: (i << 5) - i + charCode
-      const libStr = 'challenge_fingerprint_v1.0.23';
-      let hashVal = 0;
-      for (let i = 0; i < libStr.length; i++) {
-        hashVal = ((hashVal << 5) - hashVal + libStr.charCodeAt(i)) | 0;
-      }
-      const symDesc = String(Math.abs(hashVal));
-      console.log('[SMS] Symbol description (Oo):', symDesc);
-
-      // Шаг 4: Находим функцию по Symbol
-      const sym = Object.getOwnPropertySymbols(window).find(s => s.description === symDesc);
-      console.log('[SMS] Found symbol:', sym ? 'YES' : 'NO');
-
-      if (sym && typeof window[sym] === 'function') {
-        // Шаг 5: Вызываем getData(challengePayload) — собирает fingerprint
-        const fpData = await Promise.race([
+    // Шаг 4: Собираем fingerprint через window[Symbol]
+    let fpData = '';
+    const sym = Object.getOwnPropertySymbols(window).find(s => s.description === symDesc);
+    if (sym && typeof window[sym] === 'function') {
+      try {
+        fpData = await Promise.race([
           window[sym](challengePayload),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('fp timeout')), 8000))
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
         ]);
         console.log('[SMS] fpData length:', String(fpData || '').length);
-
-        btn.innerHTML = '<span class="spinner"></span> Верификация...';
-
-        // Шаг 6: Отправляем fingerprint, получаем one-time-token
-        const r2 = await fetch(ANTIBOT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payload: fpData || '' })
-        });
-        const body2 = await r2.json();
-        captchaToken = body2.token || body2.one_time_token || body2.captchaToken || '';
-        console.log('[SMS] captchaToken:', captchaToken ? captchaToken.substring(0, 30) + '...' : 'EMPTY');
-      } else {
-        console.warn('[SMS] Symbol not found, trying with empty captchaToken');
+      } catch(e) {
+        console.warn('[SMS] fingerprint error:', e.message);
       }
-    } else if (r1.ok) {
-      const body0 = await r1.json();
-      captchaToken = body0.token || '';
+    } else {
+      console.warn('[SMS] Symbol not found, symDesc:', symDesc);
     }
 
+    // Шаг 5: Сервер обменивает fingerprint на token и отправляет SMS
     btn.innerHTML = '<span class="spinner"></span> Отправляем SMS...';
-
-    // Шаг 7: Реальный запрос SMS — seller-auth.wildberries.ru (не passport!)
-    const smsRes = await fetch('https://seller-auth.wildberries.ru/auth/v2/code/wb-captcha', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone_number: phoneNum, captcha_token: captchaToken })
+    await api('POST', '/auth/request-sms-v2', {
+      phone: phoneNum,
+      fingerprint: fpData || ''
     });
 
-    const smsData = await smsRes.json().catch(() => ({}));
-    console.log('[SMS] wb-captcha response:', smsRes.status, JSON.stringify(smsData).substring(0, 120));
+    window._wbSmsPhone = phoneNum;
+    document.getElementById('authPhoneDisplay').textContent = phone;
+    document.getElementById('authPhoneStep').style.display = 'none';
+    document.getElementById('authCodeStep').style.display  = 'block';
+    setTimeout(() => { const el = document.getElementById('authCode'); el && el.focus(); }, 100);
 
-    if (smsRes.ok) {
-      // Сохраняем состояние для шага верификации
-      window._wbSmsPhone = phoneNum;
-      window._wbCaptchaToken = captchaToken;
-      await api('POST', '/auth/save-sms-state', {
-        phone: phoneNum,
-        requestToken: 'wbcaptcha:' + phoneNum + ':' + (captchaToken || 'empty')
-      }).catch(() => {});
-
-      document.getElementById('authPhoneDisplay').textContent = phone;
-      document.getElementById('authPhoneStep').style.display = 'none';
-      document.getElementById('authCodeStep').style.display  = 'block';
-      setTimeout(() => { const el = document.getElementById('authCode'); el && el.focus(); }, 100);
-    } else {
-      throw new Error(smsData.message || smsData.error || 'Ошибка WB ' + smsRes.status);
-    }
   } catch(e) {
     console.error('[SMS] Error:', e.message);
-    if (msgEl) { msgEl.style.display='block'; msgEl.className='msg msg-error show'; msgEl.textContent=e.message; }
+    if (msgEl) { msgEl.style.display='block'; msgEl.className='msg msg-error show'; msgEl.textContent=e.message || 'Ошибка'; }
   }
   btn.innerHTML = '📲 Получить SMS-код';
   btn.disabled = false;

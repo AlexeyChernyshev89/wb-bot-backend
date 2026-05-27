@@ -557,6 +557,127 @@ app.post('/auth/save-sms-state', telegramAuth, requireDB, async (req, res) => {
 });
 
 /**
+ * POST /auth/antibot-challenge
+ * Сервер запрашивает challenge у WB antibot (без CORS ограничений браузера).
+ * Возвращает challenge клиенту для сбора fingerprint.
+ */
+app.post('/auth/antibot-challenge', telegramAuth, async (req, res) => {
+  try {
+    const axios = require('axios');
+    const https = require('https');
+    const dns   = require('dns');
+
+    function ipv4Lookup(h, o, cb) { dns.lookup(h, { ...o, family: 4 }, cb); }
+    const agent = new https.Agent({ lookup: ipv4Lookup, keepAlive: false });
+
+    const r = await axios.post(
+      'https://antibot.wildberries.ru/api/v1/create-one-time-token',
+      { payload: '' },
+      {
+        headers: {
+          'Content-Type':   'application/json',
+          'Accept':         'application/json',
+          'User-Agent':     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Origin':         'https://seller.wildberries.ru',
+          'Referer':        'https://seller.wildberries.ru/',
+        },
+        httpsAgent: agent,
+        timeout: 10000,
+        validateStatus: s => s < 600,
+      }
+    );
+
+    console.log('[antibot-challenge] status:', r.status, JSON.stringify(r.data).substring(0, 100));
+
+    if (r.status === 498) {
+      // 498 = challenge нужен — отдаём challenge клиенту
+      return res.json({ status: 498, challenge: r.data.challenge || r.data });
+    }
+    if (r.status === 200) {
+      // Уже получили token без challenge
+      return res.json({ status: 200, token: r.data.token || r.data.one_time_token || '' });
+    }
+    res.status(r.status).json({ error: 'antibot returned ' + r.status, data: r.data });
+  } catch(err) {
+    console.error('[antibot-challenge] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /auth/request-sms-v2
+ * Финальный шаг: принимает fingerprint от браузера,
+ * обменивает у антибота на token, отправляет SMS через wb-captcha.
+ */
+app.post('/auth/request-sms-v2', telegramAuth, requireDB, async (req, res) => {
+  const { phone, fingerprint } = req.body;
+  if (!phone) return res.status(400).json({ error: 'phone required' });
+
+  try {
+    const axios = require('axios');
+    const https = require('https');
+    const dns   = require('dns');
+
+    function ipv4Lookup(h, o, cb) { dns.lookup(h, { ...o, family: 4 }, cb); }
+    const agent = new https.Agent({ lookup: ipv4Lookup, keepAlive: false });
+    const headers = {
+      'Content-Type':  'application/json',
+      'Accept':        'application/json',
+      'User-Agent':    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Origin':        'https://seller.wildberries.ru',
+      'Referer':       'https://seller.wildberries.ru/',
+    };
+
+    let captchaToken = '';
+
+    // Шаг A: если есть fingerprint — обмениваем на token
+    if (fingerprint) {
+      try {
+        const r2 = await axios.post(
+          'https://antibot.wildberries.ru/api/v1/create-one-time-token',
+          { payload: fingerprint },
+          { headers, httpsAgent: agent, timeout: 10000, validateStatus: s => s < 600 }
+        );
+        console.log('[request-sms-v2] antibot with fp:', r2.status, JSON.stringify(r2.data).substring(0, 80));
+        if (r2.status === 200) {
+          captchaToken = r2.data.token || r2.data.one_time_token || r2.data.captchaToken || '';
+        }
+      } catch(e) {
+        console.warn('[request-sms-v2] antibot with fp error:', e.message);
+      }
+    }
+
+    // Шаг B: отправляем SMS через seller-auth (новый endpoint!)
+    const smsR = await axios.post(
+      'https://seller-auth.wildberries.ru/auth/v2/code/wb-captcha',
+      { phone_number: phone, captcha_token: captchaToken },
+      { headers, httpsAgent: agent, timeout: 15000, validateStatus: s => s < 600 }
+    );
+
+    console.log('[request-sms-v2] wb-captcha:', smsR.status, JSON.stringify(smsR.data).substring(0, 100));
+
+    if (smsR.status === 200 || smsR.status === 204) {
+      // Сохраняем для верификации
+      await db.query(
+        `INSERT INTO sms_requests (telegram_id, phone, request_token, created_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (telegram_id) DO UPDATE SET phone=$2, request_token=$3, created_at=NOW()`,
+        [req.telegramId, phone, 'wbcaptcha:' + phone + ':' + captchaToken]
+      );
+      return res.json({ success: true, message: 'SMS отправлен на ' + phone });
+    }
+
+    const errMsg = smsR.data?.message || smsR.data?.error || 'WB вернул ' + smsR.status;
+    res.status(400).json({ success: false, error: errMsg });
+
+  } catch(err) {
+    console.error('[request-sms-v2] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+/**
  * POST /auth/request-sms
  * Шаг 1: Запросить SMS-код на телефон продавца.
  */
