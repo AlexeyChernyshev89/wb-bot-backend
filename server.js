@@ -622,6 +622,37 @@ app.get('/debug-supply-test', async (req, res) => {
 });
 
 
+// ─── SETUP: сохранить authorizev3 токен в БД без Telegram-авторизации ────
+// Используется один раз для настройки. Защищён секретным ключом.
+app.post('/auth/setup-token', requireDB, async (req, res) => {
+  const { secret, telegram_id, token } = req.body || {};
+
+  // Простая защита — секрет задаётся в Railway Variables как SETUP_SECRET
+  const SETUP_SECRET = process.env.SETUP_SECRET || 'wb-setup-2024';
+  if (secret !== SETUP_SECRET) {
+    return res.status(403).json({ error: 'Неверный секрет. Задайте SETUP_SECRET в Railway Variables.' });
+  }
+  if (!telegram_id || !token) {
+    return res.status(400).json({ error: 'Нужны: secret, telegram_id, token' });
+  }
+
+  try {
+    // Создаём/обновляем пользователя с сессионным токеном
+    await db.query(
+      `INSERT INTO users (telegram_id, wb_session_token, wb_session_updated)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (telegram_id) DO UPDATE
+       SET wb_session_token = $2, wb_session_updated = NOW()`,
+      [telegram_id.toString(), token]
+    );
+    console.log('[setup-token] Token saved for telegram_id:', telegram_id);
+    res.json({ success: true, message: 'Токен сохранён для пользователя ' + telegram_id });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 // ─── DEBUG: тест antibot с разными заголовками ─────────────────────────────
 app.post('/debug-antibot', async (req, res) => {
   const axios = require('axios');
