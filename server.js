@@ -559,66 +559,62 @@ app.post('/auth/save-sms-state', telegramAuth, requireDB, async (req, res) => {
 // ─── DEBUG: тест seller-supply.wildberries.ru с Bearer токеном ───────────
 app.get('/debug-supply-test', async (req, res) => {
   try {
-    const axios  = require('axios');
-    const https  = require('https');
-    const dns    = require('dns');
+    const axios = require('axios');
+    const https = require('https');
+    const dns   = require('dns');
     function ipv4(h, o, cb) { dns.lookup(h, { ...o, family: 4 }, cb); }
-    const agent  = new https.Agent({ lookup: ipv4, keepAlive: false });
+    const agent = new https.Agent({ lookup: ipv4, keepAlive: false });
 
-    // Берём WB_API_KEY из переменных Railway
-    const token  = process.env.WB_API_KEY || '';
+    const token = process.env.WB_API_KEY || '';
     if (!token) return res.status(400).json({ error: 'WB_API_KEY не задан в Railway Variables' });
 
-    const results = {};
+    const BASE = 'https://seller-supply.wildberries.ru';
+    const hdrs = (extra = {}) => ({
+      'Authorization': `Bearer ${token}`,
+      'Content-Type':  'application/json',
+      'Accept':        'application/json',
+      'Origin':        'https://seller.wildberries.ru',
+      'Referer':       'https://seller.wildberries.ru/stock-control',
+      ...extra,
+    });
+    const post = (url, data) => axios.post(url, data,
+      { headers: hdrs(), httpsAgent: agent, timeout: 10000, validateStatus: s => s < 600 });
 
-    // Тест 1: лимиты перемещений
+    const results = {};
+    let jid = 1;
+    const rpc = (method, params = {}) => ({
+      jsonrpc: '2.0', id: `json-rpc_${jid++}`, method, params
+    });
+
+    // ── Тест 1: AvailableLimits (квоты складов) ──────────────────────────
     try {
-      const r1 = await axios.post(
-        'https://seller-supply.wildberries.ru/ns/transfer/supply-manager/api/v1/transfer/AvailableLimits',
-        {},
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type':  'application/json',
-            'Accept':        'application/json',
-          },
-          httpsAgent: agent, timeout: 10000, validateStatus: s => s < 600,
-        }
+      // Пробуем пути которые реально используются в браузере
+      const r = await post(
+        `${BASE}/ns/goods-return/supply-manager/api/v1/transfer/AvailableLimits`,
+        {}
       );
-      results.availableLimits = { status: r1.status, data: r1.data };
+      results.availableLimits = { status: r.status, sample: JSON.stringify(r.data).substring(0, 200) };
     } catch(e) { results.availableLimits = { error: e.message }; }
 
-    // Тест 2: список складов WB для перемещений
+    // ── Тест 2: transfer/list (список доступных перемещений) ─────────────
     try {
-      const r2 = await axios.get(
-        'https://seller-supply.wildberries.ru/ns/transfer/supply-manager/api/v1/warehouse/list',
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
-          httpsAgent: agent, timeout: 10000, validateStatus: s => s < 600,
-        }
+      const r = await post(
+        `${BASE}/ns/goods-return/supply-manager/api/v1/transfer/list`,
+        {}
       );
-      results.warehouseList = { status: r2.status, data: r2.data };
-    } catch(e) { results.warehouseList = { error: e.message }; }
+      results.transferList = { status: r.status, sample: JSON.stringify(r.data).substring(0, 200) };
+    } catch(e) { results.transferList = { error: e.message }; }
 
-    // Тест 3: проверка авторизации через seller.wildberries.ru
+    // ── Тест 3: Альтернативный путь ──────────────────────────────────────
     try {
-      const r3 = await axios.get(
-        'https://seller.wildberries.ru/ns/user-info/suppliers-portal-owners-info/api/v1/suppliers-portal-owners/user-info',
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/json',
-          },
-          httpsAgent: agent, timeout: 10000, validateStatus: s => s < 600,
-        }
+      const r = await post(
+        `${BASE}/ns/transfer/supply-manager/api/v1/transfer/AvailableLimits`,
+        {}
       );
-      results.userInfo = { status: r3.status, data: r3.data };
-    } catch(e) { results.userInfo = { error: e.message }; }
+      results.altPath = { status: r.status, sample: JSON.stringify(r.data).substring(0, 200) };
+    } catch(e) { results.altPath = { error: e.message }; }
 
-    console.log('[debug-supply-test]', JSON.stringify(results).substring(0, 300));
+    console.log('[debug-supply-test] results:', JSON.stringify(results).substring(0, 400));
     res.json(results);
   } catch(err) {
     res.status(500).json({ error: err.message });
