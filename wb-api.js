@@ -304,43 +304,58 @@ async function getWbFboWarehouseNames(token) {
  * 1. Statistics API — точные FBO остатки по складам WB (требует категорию Statistics в токене)
  * 2. Fallback: Marketplace API /api/v3/stocks (FBS, склады продавца) — если Statistics недоступен
  */
-async function getArticleStocks(token, nmId) {
+async function getArticleStocks(token, nmId, sessionToken) {
   const target = parseInt(nmId);
-
-  // Получаем название товара (Content API)
   const article = await getArticleByNmId(token, nmId);
 
-  // === Попытка 1: Statistics API (FBO — склады Wildberries) ===
+  // === Попытка 1: Transfer API (seller-supply) — самый точный источник ===
+  if (sessionToken) {
+    try {
+      const resp = await sellerSupplyPost(sessionToken, '/list', {});
+      const transfers = resp?.result?.transfers || [];
+      const item = transfers.find(t => t.nmID === target);
+      if (item && item.chrts) {
+        const byWarehouse = {};
+        for (const c of item.chrts) {
+          const name = c.warehouseName || `Склад ${c.warehouseID}`;
+          byWarehouse[name] = (byWarehouse[name] || 0) + (c.count || 0);
+        }
+        const warehouses = Object.entries(byWarehouse)
+          .map(([name, amount]) => ({ name, amount }))
+          .filter(w => w.amount > 0)
+          .sort((a, b) => b.amount - a.amount);
+        console.log(`[stocks] Transfer API: nmId=${nmId} в ${warehouses.length} складах`);
+        const articleInfo = article || { nmId: target, name: `Артикул ${nmId}`, skus: [] };
+        return { article: articleInfo, warehouses, source: 'transfer_api' };
+      }
+      console.log(`[stocks] Transfer API: nmId=${nmId} не найден в transfer/list`);
+    } catch(e) {
+      console.warn('[stocks] Transfer API failed:', e.message);
+    }
+  }
+
+  // === Попытка 2: Statistics API (FBO) ===
   try {
     const allStocks = await getFboStocksRaw(token);
     const rows = Array.isArray(allStocks) ? allStocks : [];
-
     console.log(`[stocks] Statistics API: total rows=${rows.length}`);
-
     const byWarehouse = {};
     for (const item of rows) {
       if (item.nmId !== target) continue;
-      const qty = item.quantity || 0;   // доступно к продаже
+      const qty = item.quantity || 0;
       if (qty <= 0) continue;
       const wh = item.warehouseName;
       byWarehouse[wh] = (byWarehouse[wh] || 0) + qty;
     }
-
     const warehouses = Object.entries(byWarehouse)
       .map(([name, amount]) => ({ name, amount }))
       .sort((a, b) => b.amount - a.amount);
-
-    console.log(`[stocks] nmId=${nmId} found in ${warehouses.length} warehouses`);
-
+    console.log(`[stocks] Statistics API: nmId=${nmId} в ${warehouses.length} складах`);
     const articleInfo = article || { nmId: target, name: `Артикул ${nmId}`, skus: [] };
     return { article: articleInfo, warehouses, source: 'statistics' };
-
   } catch (statErr) {
-    console.warn(`[stocks] Statistics API failed (${statErr.status || statErr.message}). Trying Marketplace API fallback...`);
-
-    // === Fallback: Marketplace API (FBS — собственные склады продавца) ===
+    console.warn(`[stocks] Statistics API failed: ${statErr.message}`);
     if (!article || !article.skus.length) {
-      // Если нет ни Statistics, ни Content — возвращаем пустоту с понятной ошибкой
       const err = new Error(
         statErr.status === 401 || statErr.status === 403
           ? 'Нет доступа к Statistics API. Добавьте категорию «Статистика» в токен WB.'
@@ -349,11 +364,10 @@ async function getArticleStocks(token, nmId) {
       err.hint = 'statistics_token_required';
       throw err;
     }
-
+    // === Fallback: Marketplace API (FBS) ===
     const allWarehouses = await getWarehouses(token);
     const result = [];
     const batchSize = 5;
-
     for (let i = 0; i < allWarehouses.length; i += batchSize) {
       const batch = allWarehouses.slice(i, i + batchSize);
       await Promise.all(batch.map(async wh => {
@@ -368,13 +382,6 @@ async function getArticleStocks(token, nmId) {
     return { article, warehouses: result, source: 'marketplace_fallback' };
   }
 }
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// INTERNAL WB SELLER SUPPLY API (имитация браузерной сессии)
-// Используется @WBSupplyHelperBot и аналогами для FBO перемещений.
-// Заголовок: Authorizev3 (сессионный JWT из ЛК продавца, НЕ API-токен)
-// ═══════════════════════════════════════════════════════════════════════════════
 
 const WB_SELLER_SUPPLY = 'https://seller-supply.wildberries.ru';
 const TRANSFER_PATH    = '/ns/goods-return/supply-manager/api/v1/transfer';
