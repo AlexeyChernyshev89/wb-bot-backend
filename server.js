@@ -954,7 +954,25 @@ app.post('/auth/request-sms', telegramAuth, requireDB, async (req, res) => {
   try {
     const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
     console.log('[auth/request-sms] Phone:', cleanPhone);
-    const result = await requestSmsCode(cleanPhone);
+
+    // Используем Puppeteer прокси если задан YANDEX_FN_URL
+    let result;
+    const PROXY_URL = process.env.YANDEX_FN_URL || '';
+    if (PROXY_URL) {
+      try {
+        console.log('[auth/request-sms] Using proxy:', PROXY_URL);
+        const axios = require('axios');
+        const proxyResp = await axios.post(PROXY_URL, { phone: cleanPhone }, { timeout: 90000 });
+        const pd = proxyResp.data;
+        console.log('[auth/request-sms] Proxy result:', JSON.stringify(pd).substring(0, 200));
+        result = { success: pd.success === true, error: pd.success ? null : (pd.data?.error || pd.error || 'Ошибка прокси') };
+      } catch(proxyErr) {
+        console.warn('[auth/request-sms] Proxy failed:', proxyErr.message, '— fallback to direct');
+        result = await requestSmsCode(cleanPhone);
+      }
+    } else {
+      result = await requestSmsCode(cleanPhone);
+    }
     console.log('[auth/request-sms] Result:', JSON.stringify(result).substring(0, 200));
 
     if (!result.success) {
