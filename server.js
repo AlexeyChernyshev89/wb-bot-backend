@@ -1111,7 +1111,7 @@ app.get('/transfers/article-stocks/:nmId', telegramAuth, requireDB, async (req, 
   try {
     const token = await getUserToken(req.telegramId);
     if (!token) return res.status(401).json({ error: 'Сначала подключите WB API-токен' });
-    const sessionToken = await getSessionToken(req.telegramId);
+    const sessionToken = await getUserSessionToken(req.telegramId);
     const { article, warehouses, source } = await getArticleStocks(token, nmId, sessionToken);
     if (!article) return res.status(404).json({
       error: 'Артикул не найден. Убедитесь что токен имеет категории Content и Статистика.'
