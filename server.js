@@ -808,16 +808,18 @@ app.post('/auth/request-sms-v2', telegramAuth, requireDB, async (req, res) => {
       console.log('[request-sms-v2] Using Yandex Function:', YANDEX_FN);
       try {
         const fnRes = await axios.post(YANDEX_FN,
-          { action: 'send-sms', phone },
-          { timeout: 20000, validateStatus: s => s < 600 }
+          { phone },
+          { timeout: 90000, validateStatus: s => s < 600 }
         );
-        console.log('[request-sms-v2] Yandex fn result:', fnRes.data?.status, fnRes.data?.success);
+        const sticker = fnRes.data?.data?.payload?.sticker || null;
+        console.log('[request-sms-v2] Yandex fn result:', fnRes.data?.status, fnRes.data?.success, 'sticker:', sticker?.substring(0,8));
         if (fnRes.data?.success) {
+          const reqToken = sticker ? `sticker:${sticker}` : `phone:${phone}`;
           await db.query(
             `INSERT INTO sms_requests (telegram_id, phone, request_token, created_at)
              VALUES ($1, $2, $3, NOW()) ON CONFLICT (telegram_id)
              DO UPDATE SET phone=$2, request_token=$3, created_at=NOW()`,
-            [req.telegramId, phone, 'yafn:' + phone]
+            [req.telegramId, phone, reqToken]
           );
           return res.json({ success: true, message: 'SMS отправлен на ' + phone });
         }
