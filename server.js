@@ -965,7 +965,8 @@ app.post('/auth/request-sms', telegramAuth, requireDB, async (req, res) => {
         const proxyResp = await axios.post(PROXY_URL, { phone: cleanPhone }, { timeout: 90000 });
         const pd = proxyResp.data;
         console.log('[auth/request-sms] Proxy result:', JSON.stringify(pd).substring(0, 200));
-        result = { success: pd.success === true, error: pd.success ? null : (pd.data?.error || pd.error || 'Ошибка прокси') };
+        const sticker = pd.data?.payload?.sticker || null;
+        result = { success: pd.success === true, requestToken: sticker ? `sticker:${sticker}` : null, error: pd.success ? null : (pd.data?.error || pd.error || 'Ошибка прокси') };
       } catch(proxyErr) {
         console.warn('[auth/request-sms] Proxy failed:', proxyErr.message, '— fallback to direct');
         result = await requestSmsCode(cleanPhone);
@@ -994,7 +995,7 @@ app.post('/auth/request-sms', telegramAuth, requireDB, async (req, res) => {
        VALUES ($1, $2, $3, NOW())
        ON CONFLICT (telegram_id) DO UPDATE
          SET phone=$2, request_token=$3, created_at=NOW()`,
-      [req.telegramId, phone, result.requestToken]
+      [req.telegramId, phone, result.requestToken || `phone:${phone}`]
     );
 
     res.json({ success: true, message: 'Код отправлен на ' + phone });

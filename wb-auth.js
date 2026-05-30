@@ -190,6 +190,31 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
   console.log(`[wb-auth] Подтверждение кода ${cleanCode} для ${cleanPhone}`);
   const wbCookies  = await getWbSessionCookies();
 
+  // Если requestToken — sticker из Puppeteer (wb-captcha flow)
+  const isStickerBased = requestToken && requestToken.startsWith('sticker:');
+  if (isStickerBased) {
+    const sticker = requestToken.replace('sticker:', '');
+    console.log(`[wb-auth] Подтверждение через wb-captcha sticker: ${sticker.substring(0,8)}...`);
+    try {
+      const res = await axios.post(
+        'https://seller-auth.wildberries.ru/auth/v2/login/wb-captcha',
+        { sticker, code: cleanCode },
+        { headers: BROWSER_HEADERS, timeout: 15000, validateStatus: s => s < 500 }
+      );
+      console.log(`[wb-auth] seller-auth confirm → ${res.status}`, JSON.stringify(res.data).substring(0,100));
+      if (res.status === 200 || res.status === 201) {
+        const token = res.data?.token || res.data?.accessToken || res.data?.access_token
+          || res.data?.payload?.token || null;
+        return { success: true, sessionToken: token, cookies: '' };
+      }
+      if (res.status === 400 || res.status === 422) {
+        return { success: false, error: res.data?.message || 'Неверный код' };
+      }
+    } catch(e) {
+      console.warn('[wb-auth] seller-auth confirm error:', e.message);
+    }
+  }
+
   const isPhoneBased = requestToken && requestToken.startsWith('phone:');
   const confirmBody = isPhoneBased
     ? { phone: cleanPhone, code: cleanCode, options: { notify_code: cleanCode } }
