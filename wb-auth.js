@@ -38,9 +38,9 @@ const WB_AUTH_PROXY = process.env.WB_AUTH_PROXY || '';
 // Порядок: прямые WB эндпоинты ПЕРВЫМИ (Railway EU + IPv4 + Google DNS)
 // Cloudflare Worker — в конце как fallback (WB блокирует Cloudflare IP)
 const WB_AUTH_ENDPOINTS = [
+  'https://seller.wildberries.ru/passport/api/v2/auth',
   'https://passport.wildberries.ru/api/v2/auth',
   'https://content-suppliers.wildberries.ru/passport/api/v2/auth',
-  'https://seller.wildberries.ru/passport/api/v2/auth',
   ...(WB_AUTH_PROXY ? [WB_AUTH_PROXY + '/passport/api/v2/auth'] : []),
 ];
 
@@ -190,89 +190,76 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
   console.log(`[wb-auth] Подтверждение кода ${cleanCode} для ${cleanPhone}`);
   const wbCookies  = await getWbSessionCookies();
 
-  try {
-    // используем тот же базовый URL что сработал (или первый по умолчанию)
-    const base = WB_AUTH_ENDPOINTS[0];
-    // Если requestToken начинается с 'phone:' — WB вернул 204 без токена.
-    // В этом случае отправляем phone напрямую без token (некоторые версии WB API).
-    const isPhoneBased = requestToken && requestToken.startsWith('phone:');
-    const confirmBody = isPhoneBased
-      ? { phone: cleanPhone, code: cleanCode, options: { notify_code: cleanCode } }
-      : { token: requestToken, options: { notify_code: cleanCode } };
+  const isPhoneBased = requestToken && requestToken.startsWith('phone:');
+  const confirmBody = isPhoneBased
+    ? { phone: cleanPhone, code: cleanCode, options: { notify_code: cleanCode } }
+    : { token: requestToken, options: { notify_code: cleanCode } };
 
-    console.log('[wb-auth] confirm body:', JSON.stringify(confirmBody).substring(0, 100));
+  console.log('[wb-auth] confirm body:', JSON.stringify(confirmBody).substring(0, 100));
 
-    const res = await axios.post(
-      `${base}/login`,
-      confirmBody,
-      {
-        headers:          BROWSER_HEADERS,
-        timeout:          15000,
-        httpsAgent:       WB_AGENT,
-        withCredentials:  true,
-        // Важно — читаем Set-Cookie из ответа
-        validateStatus:   s => s < 500,
+  // Перебираем endpoints — seller.wildberries.ru работает из Railway
+  for (const base of WB_AUTH_ENDPOINTS) {
+    try {
+      const res = await axios.post(
+        `${base}/login`,
+        confirmBody,
+        {
+          headers:         BROWSER_HEADERS,
+          timeout:         15000,
+          httpsAgent:      WB_AGENT,
+          withCredentials: true,
+          validateStatus:  s => s < 500,
+        }
+      );
+
+      const status = res.status;
+      console.log(`[wb-auth] ${base}/login → ${status}`);
+
+      if (status === 400 || status === 422) {
+        const msg = res.data?.message || 'Неверный SMS-код';
+        return { success: false, error: msg };
       }
-    );
-
-    const status = res.status;
-    console.log(`[wb-auth] confirmSmsCode status: ${status}`);
-
-    if (status === 400 || status === 422) {
-      const msg = res.data?.message || 'Неверный SMS-код';
-      return { success: false, error: msg };
-    }
-    if (status !== 200) {
-      return { success: false, error: `Ошибка WB Auth (${status})` };
-    }
-
-    // Собираем Set-Cookie из ответа — это и есть наша сессия
-    const setCookieHeader = res.headers['set-cookie'];
-    let sessionCookies = '';
-    if (Array.isArray(setCookieHeader)) {
-      sessionCookies = setCookieHeader
-        .map(c => c.split(';')[0])   // берём только имя=значение без expires и т.д.
-        .join('; ');
-    }
-
-    // Пробуем извлечь Authorizev3 JWT из тела ответа или cookie
-    const bodyToken = res.data?.token || res.data?.accessToken || res.data?.access_token || null;
-
-    // Ищем zzatw-wb в cookies — это обычно и есть Authorizev3
-    let authorizev3 = bodyToken;
-    if (!authorizev3 && setCookieHeader) {
-      const zzatwCookie = (Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader])
-        .find(c => c.includes('zzatw-wb='));
-      if (zzatwCookie) {
-        authorizev3 = zzatwCookie.split('zzatw-wb=')[1]?.split(';')[0] || null;
+      if (status !== 200) {
+        console.warn(`[wb-auth] ${base} → ${status}, trying next...`);
+        continue;
       }
+
+      const setCookieHeader = res.headers['set-cookie'];
+      let sessionCookies = '';
+      if (Array.isArray(setCookieHeader)) {
+        sessionCookies = setCookieHeader.map(c => c.split(';')[0]).join('; ');
+      }
+
+      const bodyToken = res.data?.token || res.data?.accessToken || res.data?.access_token || null;
+      let authorizev3 = bodyToken;
+      if (!authorizev3 && setCookieHeader) {
+        const zzatwCookie = (Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader])
+          .find(c => c.includes('zzatw-wb='));
+        if (zzatwCookie) {
+          authorizev3 = zzatwCookie.split('zzatw-wb=')[1]?.split(';')[0] || null;
+        }
+      }
+
+      console.log(`[wb-auth] ✅ Авторизация успешна через ${base}. authorizev3=${authorizev3 ? authorizev3.substring(0,20)+'...' : 'не найден'}`);
+
+      if (!authorizev3 && sessionCookies) {
+        authorizev3 = await fetchAuthorizev3(sessionCookies);
+      }
+
+      return {
+        success:      true,
+        sessionToken: authorizev3 || sessionCookies,
+        cookies:      sessionCookies,
+      };
+    } catch (err) {
+      console.warn(`[wb-auth] ${base}/login error:`, err.message);
     }
-
-    console.log(`[wb-auth] ✅ Авторизация успешна. cookies=${sessionCookies.length}b authorizev3=${authorizev3 ? authorizev3.substring(0,20)+'...' : 'не найден'}`);
-
-    // Если не нашли Authorizev3 напрямую — пробуем получить его отдельным запросом
-    if (!authorizev3 && sessionCookies) {
-      authorizev3 = await fetchAuthorizev3(sessionCookies);
-    }
-
-    return {
-      success:      true,
-      sessionToken: authorizev3 || sessionCookies,  // используем что получили
-      cookies:      sessionCookies,
-    };
-
-  } catch (err) {
-    const status = err.response?.status;
-    const detail = err.response?.data;
-    console.error('[wb-auth] confirmSmsCode error:', status, JSON.stringify(detail));
-    return { success: false, error: detail?.message || `Ошибка подтверждения (${status || 'сеть'})` };
   }
+
+  return { success: false, error: 'Ошибка подтверждения — все endpoint недоступны' };
 }
 
-/**
- * Получить Authorizev3 JWT через сессионные cookie.
- * Некоторые версии WB требуют отдельного запроса для получения JWT.
- */
+
 async function fetchAuthorizev3(sessionCookies) {
   const endpoints = [
     'https://seller.wildberries.ru/user-settings/api/v1/user-config',
