@@ -197,7 +197,7 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
     console.log(`[wb-auth] Подтверждение через wb-captcha sticker: ${sticker.substring(0,8)}...`);
     try {
       const res = await axios.post(
-        'https://seller-auth.wildberries.ru/auth/v2/login/wb-captcha',
+        'https://seller-auth.wildberries.ru/auth/v2/login',
         { sticker, code: cleanCode },
         { headers: BROWSER_HEADERS, timeout: 15000, validateStatus: s => s < 500 }
       );
@@ -243,6 +243,23 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
       if (status === 400 || status === 422) {
         const msg = res.data?.message || 'Неверный SMS-код';
         return { success: false, error: msg };
+      }
+      if (status === 204) {
+        // WB возвращает 204 при успешном подтверждении — токен в Set-Cookie
+        const setCookieHeader = res.headers['set-cookie'];
+        let sessionCookies = '';
+        if (Array.isArray(setCookieHeader)) {
+          sessionCookies = setCookieHeader.map(c => c.split(';')[0]).join('; ');
+        }
+        let authorizev3 = null;
+        if (setCookieHeader) {
+          const zzatwCookie = (Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader])
+            .find(c => c.includes('zzatw-wb='));
+          if (zzatwCookie) authorizev3 = zzatwCookie.split('zzatw-wb=')[1]?.split(';')[0] || null;
+        }
+        if (!authorizev3 && sessionCookies) authorizev3 = await fetchAuthorizev3(sessionCookies);
+        console.log(`[wb-auth] ✅ 204 через ${base}, authorizev3=${authorizev3 ? 'найден' : 'не найден'}`);
+        return { success: true, sessionToken: authorizev3 || sessionCookies, cookies: sessionCookies };
       }
       if (status !== 200) {
         console.warn(`[wb-auth] ${base} → ${status}, trying next...`);
