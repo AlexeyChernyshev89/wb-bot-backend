@@ -49,6 +49,8 @@ async function initDB() {
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS wb_session_token   TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS wb_session_updated TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMP DEFAULT NOW();
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username           VARCHAR(255);
 
     CREATE TABLE IF NOT EXISTS sms_requests (
       telegram_id  BIGINT PRIMARY KEY,
@@ -1033,13 +1035,16 @@ app.post('/auth/verify-sms', telegramAuth, requireDB, async (req, res) => {
     }
 
     // Сохраняем сессионный токен (Authorizev3) в users
-    await db.query(
+    console.log('[verify-sms] saving token for', req.telegramId,
+      '| sessionToken:', result.sessionToken ? result.sessionToken.substring(0,30)+'...' : 'NULL');
+    const saveRes = await db.query(
       `INSERT INTO users (telegram_id, wb_session_token, wb_session_updated, updated_at)
        VALUES ($1, $2, NOW(), NOW())
        ON CONFLICT (telegram_id) DO UPDATE
          SET wb_session_token=$2, wb_session_updated=NOW(), updated_at=NOW()`,
       [req.telegramId, result.sessionToken]
     );
+    console.log('[verify-sms] saved rows:', saveRes.rowCount);
 
     // Удаляем временный SMS-запрос
     await db.query('DELETE FROM sms_requests WHERE telegram_id=$1', [req.telegramId]);
