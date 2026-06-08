@@ -242,11 +242,11 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
 
   // Хелпер: вызов через Windows прокси (Russian IP, Russian network)
   async function callViaProxy(url, body) {
-    if (!proxyUrl || !sessionToken) throw new Error('no proxy or sessionToken');
+    if (!proxyUrl || !token) throw new Error('no proxy or apiToken');
     const res = await axios.post(`${proxyUrl}/wb-call`, {
       url, method: 'POST', body,
-      token: sessionToken,
-      cookies: sessionCookies || ''
+      token: token,        // ← PUBLIC API token для Authorization: Bearer
+      authType: 'bearer'   // ← analytics-api использует Bearer auth
     }, { timeout: 25000 });
     if (res.data?.status >= 400) throw new Error(`proxy ${url} → ${res.data.status}`);
     return res.data?.data;
@@ -362,9 +362,12 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
     const byWarehouse = {};
     for (const item of rows) {
       if (item.nmId !== target) continue;
-      const qty = item.quantity || 0;
+      // Используем quantityFull (полный остаток) или quantity (доступно к заказу)
+      // quantityFull включает товары в пути, на складе и зарезервированные
+      const qty = (item.quantityFull || 0) + (item.inWayToClient || 0) + (item.inWayFromClient || 0) || (item.quantity || 0);
       if (qty <= 0) continue;
       const wh = item.warehouseName;
+      if (!wh) continue;
       byWarehouse[wh] = (byWarehouse[wh] || 0) + qty;
     }
     const warehouses = Object.entries(byWarehouse)
