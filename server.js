@@ -1146,6 +1146,8 @@ app.get('/transfers/article-stocks/:nmId', telegramAuth, requireDB, async (req, 
       error: 'Артикул не найден. Убедитесь что токен имеет категории Content и Статистика.'
     });
     console.log(`[article-stocks] nmId=${nmId} source=${source} warehouses=${warehouses.length}`);
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.set('Pragma', 'no-cache');
     res.json({ nmId: article.nmId, name: article.name, warehouses });
   } catch(err) {
     console.error('article-stocks error:', err.message, err.hint || '');
