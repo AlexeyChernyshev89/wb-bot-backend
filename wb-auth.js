@@ -206,7 +206,7 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
         const pd = proxyRes.data;
         console.log(`[wb-auth] proxy /confirm →`, JSON.stringify(pd).substring(0, 150));
         if (pd.success && pd.token) {
-          return { success: true, sessionToken: pd.token, cookies: '' };
+          return { success: true, sessionToken: pd.token, cookies: pd.cookies || '' };
         }
         if (!pd.success) {
           console.warn('[wb-auth] proxy confirm failed:', pd.error);

@@ -304,14 +304,14 @@ async function getWbFboWarehouseNames(token) {
  * 1. Statistics API — точные FBO остатки по складам WB (требует категорию Statistics в токене)
  * 2. Fallback: Marketplace API /api/v3/stocks (FBS, склады продавца) — если Statistics недоступен
  */
-async function getArticleStocks(token, nmId, sessionToken) {
+async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null) {
   const target = parseInt(nmId);
   const article = await getArticleByNmId(token, nmId);
 
   // === Попытка 1: Transfer API (seller-supply) — самый точный источник ===
   if (sessionToken) {
     try {
-      const resp = await sellerSupplyPost(sessionToken, '/list', {});
+      const resp = await sellerSupplyPost(sessionToken, '/list', {}, sessionCookies);
       const transfers = resp?.result?.transfers || [];
       const item = transfers.find(t => t.nmID === target);
       if (item && item.chrts) {
@@ -389,24 +389,25 @@ const TRANSFER_PATH    = '/ns/goods-return/supply-manager/api/v1/transfer';
 /**
  * Базовый POST к внутреннему API seller-supply.wildberries.ru
  */
-async function sellerSupplyPost(sessionToken, endpoint, body = {}) {
+async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookies = null) {
   try {
+    const headers = {
+      Authorizev3:      sessionToken,
+      'Content-Type':   'application/json',
+      Accept:           '*/*',
+      Origin:           'https://seller.wildberries.ru',
+      Referer:          'https://seller.wildberries.ru/stock-control',
+      'User-Agent':     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept-Language':'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+    };
+    if (sessionCookies) {
+      headers['Cookie'] = sessionCookies;
+      console.log('[seller-supply] using cookies:', sessionCookies.substring(0, 60));
+    }
     const res = await axios.post(
       `${WB_SELLER_SUPPLY}${TRANSFER_PATH}${endpoint}`,
       body,
-      {
-        headers: {
-          Authorizev3:      sessionToken,
-          'Content-Type':   'application/json',
-          Accept:           '*/*',
-          Origin:           'https://seller.wildberries.ru',
-          Referer:          'https://seller.wildberries.ru/stock-control',
-          'User-Agent':     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept-Language':'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-        },
-        data: body,
-        timeout: 15000,
-      }
+      { headers, timeout: 15000 }
     );
     return res.data;
   } catch (err) {
@@ -428,8 +429,8 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}) {
  * POST /transfer/AvailableLimits
  * Возвращает: массив складов с полями officeId, officeName, available (bool), qty
  */
-async function getTransferAvailableLimits(sessionToken, nmId) {
-  return sellerSupplyPost(sessionToken, '/AvailableLimits', { nmId: Number(nmId) });
+async function getTransferAvailableLimits(sessionToken, nmId, sessionCookies = null) {
+  return sellerSupplyPost(sessionToken, '/AvailableLimits', { nmId: Number(nmId) }, sessionCookies);
 }
 
 /**

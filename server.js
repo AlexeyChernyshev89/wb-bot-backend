@@ -51,6 +51,7 @@ async function initDB() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS wb_session_updated TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMP DEFAULT NOW();
     ALTER TABLE users ADD COLUMN IF NOT EXISTS username           VARCHAR(255);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS wb_session_cookies TEXT;
 
     CREATE TABLE IF NOT EXISTS sms_requests (
       telegram_id  BIGINT PRIMARY KEY,
@@ -209,10 +210,12 @@ async function telegramAuth(req, res, next) {
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 async function getUserSessionToken(telegramId) {
-  const r = await db.query('SELECT wb_session_token, wb_token FROM users WHERE telegram_id=$1', [telegramId]);
+  const r = await db.query('SELECT wb_session_token, wb_token, wb_session_cookies FROM users WHERE telegram_id=$1', [telegramId]);
   const row = r.rows[0];
-  // Возвращаем сессионный токен, или если его нет — пробуем API-токен как Authorizev3
-  return row?.wb_session_token || row?.wb_token || null;
+  return {
+    token: row?.wb_session_token || row?.wb_token || null,
+    cookies: row?.wb_session_cookies || null
+  };
 }
 
 // ─── Вспомогательная функция: получить wb_token пользователя ─────────────────
@@ -1038,11 +1041,11 @@ app.post('/auth/verify-sms', telegramAuth, requireDB, async (req, res) => {
     console.log('[verify-sms] saving token for', req.telegramId,
       '| sessionToken:', result.sessionToken ? result.sessionToken.substring(0,30)+'...' : 'NULL');
     const saveRes = await db.query(
-      `INSERT INTO users (telegram_id, wb_session_token, wb_session_updated, updated_at)
-       VALUES ($1, $2, NOW(), NOW())
+      `INSERT INTO users (telegram_id, wb_session_token, wb_session_cookies, wb_session_updated, updated_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
        ON CONFLICT (telegram_id) DO UPDATE
-         SET wb_session_token=$2, wb_session_updated=NOW(), updated_at=NOW()`,
-      [req.telegramId, result.sessionToken]
+         SET wb_session_token=$2, wb_session_cookies=$3, wb_session_updated=NOW(), updated_at=NOW()`,
+      [req.telegramId, result.sessionToken, result.cookies || null]
     );
     console.log('[verify-sms] saved rows:', saveRes.rowCount);
 
@@ -1137,8 +1140,8 @@ app.get('/transfers/article-stocks/:nmId', telegramAuth, requireDB, async (req, 
   try {
     const token = await getUserToken(req.telegramId);
     if (!token) return res.status(401).json({ error: 'Сначала подключите WB API-токен' });
-    const sessionToken = await getUserSessionToken(req.telegramId);
-    const { article, warehouses, source } = await getArticleStocks(token, nmId, sessionToken);
+    const { token: sessionToken, cookies: sessionCookies } = await getUserSessionToken(req.telegramId);
+    const { article, warehouses, source } = await getArticleStocks(token, nmId, sessionToken, sessionCookies);
     if (!article) return res.status(404).json({
       error: 'Артикул не найден. Убедитесь что токен имеет категории Content и Статистика.'
     });
@@ -1509,7 +1512,7 @@ async function processRequest(req) {
  */
 async function executeRedistribution(wbToken, req) {
   // Получаем сессионный токен пользователя
-  const sessionToken = await getUserSessionToken(req.user_id);
+  const { token: sessionToken, cookies: sessionCookies } = await getUserSessionToken(req.user_id);
 
   if (!sessionToken) {
     const e = new Error(
@@ -1523,7 +1526,7 @@ async function executeRedistribution(wbToken, req) {
   // Шаг 1: Получаем доступные лимиты для данного артикула
   let limitsData;
   try {
-    limitsData = await getTransferAvailableLimits(sessionToken, req.sku);
+    limitsData = await getTransferAvailableLimits(sessionToken, req.sku, sessionCookies);
   } catch (err) {
     if (err.sessionExpired) {
       const e = new Error('Сессионный токен истёк. Обновите Authorizev3 в разделе «Обновить токен WB»');
