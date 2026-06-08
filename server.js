@@ -1039,7 +1039,8 @@ app.post('/auth/verify-sms', telegramAuth, requireDB, async (req, res) => {
 
     // Сохраняем сессионный токен (Authorizev3) в users
     console.log('[verify-sms] saving token for', req.telegramId,
-      '| sessionToken:', result.sessionToken ? result.sessionToken.substring(0,30)+'...' : 'NULL');
+      '| sessionToken:', result.sessionToken ? result.sessionToken.substring(0,30)+'...' : 'NULL',
+      '| cookies:', result.cookies ? result.cookies.substring(0,50)+'...' : 'NULL');
     const saveRes = await db.query(
       `INSERT INTO users (telegram_id, wb_session_token, wb_session_cookies, wb_session_updated, updated_at)
        VALUES ($1, $2, $3, NOW(), NOW())
