@@ -263,23 +263,15 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
     console.log(`[FBO stocks] Analytics API direct: ${rows.length} строк`);
     return rows;
   } catch (analyticsErr) {
-    console.warn(`[FBO stocks] Analytics API (${analyticsErr.message}), trying proxy...`);
+    // analytics-api.wildberries.ru DNS fails - пропускаем прокси, сразу Statistics
+    if (analyticsErr.message && analyticsErr.message.includes('ENOTFOUND')) {
+      console.warn(`[FBO stocks] Analytics API ENOTFOUND → Statistics API...`);
+    } else {
+      console.warn(`[FBO stocks] Analytics API (${analyticsErr.message}), → Statistics API...`);
+    }
   }
 
-  // === Попытка 2: Analytics API через Windows прокси (Russian IP) ===
-  try {
-    const response = await callViaProxy(
-      `${WB_ANALYTICS_API}/api/analytics/v1/stocks-report/wb-warehouses`,
-      analyticsBody
-    );
-    const rows = response?.data || response?.stocks || [];
-    console.log(`[FBO stocks] Analytics API via proxy: ${rows.length} строк`);
-    return rows;
-  } catch (proxyErr) {
-    console.warn(`[FBO stocks] Analytics proxy failed (${proxyErr.message}), fallback → Statistics API...`);
-  }
-
-  // === Попытка 3: Statistics API (устарел, отключается 23.06.2026) ===
+  // === Попытка 2: Statistics API (устарел, отключается 23.06.2026) ===
   try {
     const data = await apiRequest('GET', WB_STATISTICS_API,
       '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
