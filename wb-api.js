@@ -236,39 +236,59 @@ async function getArticleByNmId(token, nmId) {
  * Поля ответа: warehouseName, nmId, quantity (доступно к продаже),
  *              quantityFull (полный остаток включая в пути), inWayToClient, inWayFromClient.
  */
-async function getFboStocksRaw(token, nmIds = null) {
+async function getFboStocksRaw(token, nmIds = null, sessionToken = null, sessionCookies = null) {
   const WB_ANALYTICS_API = 'https://analytics-api.wildberries.ru';
+  const proxyUrl = process.env.YANDEX_FN_URL;
 
-  // === Попытка 1: Новый Analytics API (добавлен 23.03.2026) ===
-  // POST /api/analytics/v1/stocks-report/wb-warehouses
-  // Токен: категория Analytics. Лимит: 1 запрос / 20 сек, до 250 000 строк.
+  // Хелпер: вызов через Windows прокси (Russian IP, Russian network)
+  async function callViaProxy(url, body) {
+    if (!proxyUrl || !sessionToken) throw new Error('no proxy or sessionToken');
+    const res = await axios.post(`${proxyUrl}/wb-call`, {
+      url, method: 'POST', body,
+      token: sessionToken,
+      cookies: sessionCookies || ''
+    }, { timeout: 25000 });
+    if (res.data?.status >= 400) throw new Error(`proxy ${url} → ${res.data.status}`);
+    return res.data?.data;
+  }
+
+  const analyticsBody = { pagination: { limit: 250000, offset: 0 } };
+  if (nmIds && nmIds.length > 0) analyticsBody.filter = { nmIDs: nmIds };
+
+  // === Попытка 1: Analytics API напрямую (может работать если Railway разрешит) ===
   try {
-    const body = { pagination: { limit: 250000, offset: 0 } };
-    if (nmIds && nmIds.length > 0) body.filter = { nmIDs: nmIds };
-
     const response = await apiRequest('POST', WB_ANALYTICS_API,
-      '/api/analytics/v1/stocks-report/wb-warehouses', token, body);
-
+      '/api/analytics/v1/stocks-report/wb-warehouses', token, analyticsBody);
     const rows = response?.data || response?.stocks || [];
-    console.log(`[FBO stocks] Analytics API: ${rows.length} строк`);
+    console.log(`[FBO stocks] Analytics API direct: ${rows.length} строк`);
     return rows;
-
   } catch (analyticsErr) {
-    console.warn(`[FBO stocks] Analytics API (${analyticsErr.status || analyticsErr.message}), fallback → Statistics API...`);
+    console.warn(`[FBO stocks] Analytics API (${analyticsErr.message}), trying proxy...`);
+  }
 
-    // === Fallback: Statistics API — ОТКЛЮЧАЕТСЯ 23.06.2026 ===
-    try {
-      const data = await apiRequest('GET', WB_STATISTICS_API,
-        '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
-      const rows = Array.isArray(data) ? data : [];
-      console.log(`[FBO stocks] Statistics fallback: ${rows.length} строк`);
-      return rows;
-    } catch (statErr) {
-      console.error(`[FBO stocks] Оба API недоступны`);
-      throw new Error(
-        'Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.'
-      );
-    }
+  // === Попытка 2: Analytics API через Windows прокси (Russian IP) ===
+  try {
+    const response = await callViaProxy(
+      `${WB_ANALYTICS_API}/api/analytics/v1/stocks-report/wb-warehouses`,
+      analyticsBody
+    );
+    const rows = response?.data || response?.stocks || [];
+    console.log(`[FBO stocks] Analytics API via proxy: ${rows.length} строк`);
+    return rows;
+  } catch (proxyErr) {
+    console.warn(`[FBO stocks] Analytics proxy failed (${proxyErr.message}), fallback → Statistics API...`);
+  }
+
+  // === Попытка 3: Statistics API (устарел, отключается 23.06.2026) ===
+  try {
+    const data = await apiRequest('GET', WB_STATISTICS_API,
+      '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
+    const rows = Array.isArray(data) ? data : [];
+    console.log(`[FBO stocks] Statistics fallback: ${rows.length} строк`);
+    return rows;
+  } catch (statErr) {
+    console.error(`[FBO stocks] Оба API недоступны`);
+    throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
   }
 }
 
@@ -336,7 +356,7 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
 
   // === Попытка 2: Statistics API (FBO) ===
   try {
-    const allStocks = await getFboStocksRaw(token);
+    const allStocks = await getFboStocksRaw(token, [target], sessionToken, sessionCookies);
     const rows = Array.isArray(allStocks) ? allStocks : [];
     console.log(`[stocks] Statistics API: total rows=${rows.length}`);
     const byWarehouse = {};
