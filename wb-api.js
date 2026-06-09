@@ -236,34 +236,34 @@ async function getArticleByNmId(token, nmId) {
  * Поля ответа: warehouseName, nmId, quantity (доступно к продаже),
  *              quantityFull (полный остаток включая в пути), inWayToClient, inWayFromClient.
  */
+// ─── Кеш FBO остатков (избегаем rate limit Statistics API 1 req/min) ─────────
+const _fboCache = { data: null, ts: 0, key: '' };
+const FBO_CACHE_TTL = 90 * 1000; // 90 секунд
+
 async function getFboStocksRaw(token, nmIds = null, sessionToken = null, sessionCookies = null) {
   const WB_ANALYTICS_API = 'https://analytics-api.wildberries.ru';
-  const proxyUrl = process.env.YANDEX_FN_URL;
+  const cacheKey = token ? token.substring(0, 20) : '';
+  const now = Date.now();
 
-  // Хелпер: вызов через Windows прокси (Russian IP, Russian network)
-  async function callViaProxy(url, body) {
-    if (!proxyUrl || !token) throw new Error('no proxy or apiToken');
-    const res = await axios.post(`${proxyUrl}/wb-call`, {
-      url, method: 'POST', body,
-      token: token,        // ← PUBLIC API token для Authorization: Bearer
-      authType: 'bearer'   // ← analytics-api использует Bearer auth
-    }, { timeout: 25000 });
-    if (res.data?.status >= 400) throw new Error(`proxy ${url} → ${res.data.status}`);
-    return res.data?.data;
+  // Возвращаем кеш если он свежий (< 90 сек)
+  if (_fboCache.data && _fboCache.key === cacheKey && now - _fboCache.ts < FBO_CACHE_TTL) {
+    const rows = _fboCache.data;
+    console.log(`[FBO stocks] Cache hit: ${rows.length} строк`);
+    return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
   }
 
   const analyticsBody = { pagination: { limit: 250000, offset: 0 } };
   if (nmIds && nmIds.length > 0) analyticsBody.filter = { nmIDs: nmIds };
 
-  // === Попытка 1: Analytics API напрямую (может работать если Railway разрешит) ===
+  // === Попытка 1: Analytics API напрямую ===
   try {
     const response = await apiRequest('POST', WB_ANALYTICS_API,
       '/api/analytics/v1/stocks-report/wb-warehouses', token, analyticsBody);
     const rows = response?.data || response?.stocks || [];
     console.log(`[FBO stocks] Analytics API direct: ${rows.length} строк`);
-    return rows;
+    _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
+    return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
   } catch (analyticsErr) {
-    // analytics-api.wildberries.ru DNS fails - пропускаем прокси, сразу Statistics
     if (analyticsErr.message && analyticsErr.message.includes('ENOTFOUND')) {
       console.warn(`[FBO stocks] Analytics API ENOTFOUND → Statistics API...`);
     } else {
@@ -277,7 +277,9 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
       '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
     const rows = Array.isArray(data) ? data : [];
     console.log(`[FBO stocks] Statistics fallback: ${rows.length} строк`);
-    return rows;
+    // Сохраняем ВСЕ данные в кеш (не только по nmIds)
+    _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
+    return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
   } catch (statErr) {
     console.error(`[FBO stocks] Оба API недоступны`);
     throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
