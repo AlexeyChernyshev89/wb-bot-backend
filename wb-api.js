@@ -289,8 +289,33 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
     console.warn(`[FBO stocks] Statistics 429 → trying via proxy...`);
   }
 
-  // === Попытка 3: Statistics API через Windows прокси (другой IP, другой rate limit) ===
-  const proxyUrl = process.env.YANDEX_FN_URL;
+  // === Попытка 3: Statistics API через session JWT (authorizev3) при 429 ===
+  // Seller portal вызывает Statistics API с session JWT — другой rate limit!
+  if (statsErr429 && sessionToken) {
+    try {
+      const res = await axios.get(
+        `${WB_STATISTICS_API}/api/v1/supplier/stocks?dateFrom=2019-01-01`,
+        {
+          headers: {
+            'Authorizev3': sessionToken,
+            'Accept': 'application/json',
+            'Origin': 'https://seller.wildberries.ru',
+          },
+          validateStatus: () => true,
+          timeout: 15000,
+        }
+      );
+      if (res.status === 200 && Array.isArray(res.data)) {
+        const rows = res.data;
+        console.log(`[FBO stocks] Statistics via session JWT: ${rows.length} строк`);
+        _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
+        return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
+      }
+      console.warn(`[FBO stocks] Statistics session JWT → ${res.status}`);
+    } catch(e) {
+      console.warn(`[FBO stocks] Statistics session JWT error: ${e.message}`);
+    }
+  }
   if (proxyUrl && token) {
     try {
       const res = await axios.post(`${proxyUrl}/wb-call`, {
