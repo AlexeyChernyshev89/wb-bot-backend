@@ -316,7 +316,10 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
       console.warn(`[FBO stocks] Statistics session JWT error: ${e.message}`);
     }
   }
-  if (proxyUrl && token) {
+
+  // === Попытка 4: Statistics API через Windows прокси (другой IP) ===
+  const proxyUrl = process.env.YANDEX_FN_URL;
+  if (statsErr429 && proxyUrl && token) {
     try {
       const res = await axios.post(`${proxyUrl}/wb-call`, {
         url: `${WB_STATISTICS_API}/api/v1/supplier/stocks?dateFrom=2019-01-01`,
