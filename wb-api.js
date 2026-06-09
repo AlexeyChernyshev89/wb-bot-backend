@@ -410,9 +410,10 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
     const byWarehouse = {};
     for (const item of rows) {
       if (item.nmId !== target) continue;
-      // Используем quantityFull (полный остаток) или quantity (доступно к заказу)
-      // quantityFull включает товары в пути, на складе и зарезервированные
-      const qty = (item.quantityFull || 0) + (item.inWayToClient || 0) + (item.inWayFromClient || 0) || (item.quantity || 0);
+      // quantityFull = полный остаток на складе (уже включает всё)
+      // quantity = доступно к заказу (может быть меньше из-за резервов)
+      // Для перемещений нас интересует quantityFull
+      const qty = item.quantityFull > 0 ? item.quantityFull : (item.quantity || 0);
       if (qty <= 0) continue;
       const wh = item.warehouseName;
       if (!wh) continue;
