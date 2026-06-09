@@ -272,18 +272,47 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
   }
 
   // === Попытка 2: Statistics API (устарел, отключается 23.06.2026) ===
+  let statsErr429 = false;
   try {
     const data = await apiRequest('GET', WB_STATISTICS_API,
       '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
     const rows = Array.isArray(data) ? data : [];
     console.log(`[FBO stocks] Statistics fallback: ${rows.length} строк`);
-    // Сохраняем ВСЕ данные в кеш (не только по nmIds)
     _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
     return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
   } catch (statErr) {
-    console.error(`[FBO stocks] Оба API недоступны`);
-    throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
+    statsErr429 = statErr.status === 429 || (statErr.message || '').includes('429');
+    if (!statsErr429) {
+      console.error(`[FBO stocks] Оба API недоступны`);
+      throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
+    }
+    console.warn(`[FBO stocks] Statistics 429 → trying via proxy...`);
   }
+
+  // === Попытка 3: Statistics API через Windows прокси (другой IP, другой rate limit) ===
+  const proxyUrl = process.env.YANDEX_FN_URL;
+  if (proxyUrl && token) {
+    try {
+      const res = await axios.post(`${proxyUrl}/wb-call`, {
+        url: `${WB_STATISTICS_API}/api/v1/supplier/stocks?dateFrom=2019-01-01`,
+        method: 'GET',
+        token,
+        authType: 'bearer'
+      }, { timeout: 20000 });
+      if (res.data?.status === 200) {
+        const rows = Array.isArray(res.data?.data) ? res.data.data : [];
+        console.log(`[FBO stocks] Statistics via proxy: ${rows.length} строк`);
+        _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
+        return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
+      }
+      console.warn(`[FBO stocks] Statistics proxy returned ${res.data?.status}`);
+    } catch(e) {
+      console.warn(`[FBO stocks] Statistics proxy error: ${e.message}`);
+    }
+  }
+
+  console.error(`[FBO stocks] Все источники недоступны`);
+  throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
 }
 
 /**
