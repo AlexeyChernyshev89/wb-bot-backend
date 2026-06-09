@@ -290,7 +290,6 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
   }
 
   // === Попытка 3: Statistics API через session JWT (authorizev3) при 429 ===
-  // Seller portal вызывает Statistics API с session JWT — другой rate limit!
   if (statsErr429 && sessionToken) {
     try {
       const res = await axios.get(
@@ -317,30 +316,8 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
     }
   }
 
-  // === Попытка 4: Statistics API через Windows прокси (другой IP) ===
-  const proxyUrl = process.env.YANDEX_FN_URL;
-  if (statsErr429 && proxyUrl && token) {
-    try {
-      const res = await axios.post(`${proxyUrl}/wb-call`, {
-        url: `${WB_STATISTICS_API}/api/v1/supplier/stocks?dateFrom=2019-01-01`,
-        method: 'GET',
-        token,
-        authType: 'bearer'
-      }, { timeout: 20000 });
-      if (res.data?.status === 200) {
-        const rows = Array.isArray(res.data?.data) ? res.data.data : [];
-        console.log(`[FBO stocks] Statistics via proxy: ${rows.length} строк`);
-        _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
-        return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
-      }
-      console.warn(`[FBO stocks] Statistics proxy returned ${res.data?.status}`);
-    } catch(e) {
-      console.warn(`[FBO stocks] Statistics proxy error: ${e.message}`);
-    }
-  }
-
-  console.error(`[FBO stocks] Все источники недоступны`);
-  throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
+  console.error(`[FBO stocks] Все источники недоступны (Statistics 429)`);
+  throw new Error('Statistics API временно недоступен (rate limit). Попробуйте позже.');
 }
 
 /**
