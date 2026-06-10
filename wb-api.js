@@ -239,6 +239,7 @@ async function getArticleByNmId(token, nmId) {
 // ─── Кеш FBO остатков (избегаем rate limit Statistics API 1 req/min) ─────────
 const _fboCache = { data: null, ts: 0, key: '' };
 const FBO_CACHE_TTL = 90 * 1000; // 90 секунд
+let _fboInflight = null; // Дедупликация: если запрос уже летит — ждём его
 
 async function getFboStocksRaw(token, nmIds = null, sessionToken = null, sessionCookies = null) {
   const WB_ANALYTICS_API = 'https://analytics-api.wildberries.ru';
@@ -252,72 +253,81 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
     return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
   }
 
+  // Если уже есть запрос в полёте — ждём его результата (дедупликация)
+  if (_fboInflight) {
+    console.log(`[FBO stocks] Waiting for inflight request...`);
+    const rows = await _fboInflight;
+    return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
+  }
+
   const analyticsBody = { pagination: { limit: 250000, offset: 0 } };
   if (nmIds && nmIds.length > 0) analyticsBody.filter = { nmIDs: nmIds };
 
-  // === Попытка 1: Analytics API напрямую ===
-  try {
-    const response = await apiRequest('POST', WB_ANALYTICS_API,
-      '/api/analytics/v1/stocks-report/wb-warehouses', token, analyticsBody);
-    const rows = response?.data || response?.stocks || [];
-    console.log(`[FBO stocks] Analytics API direct: ${rows.length} строк`);
-    _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
-    return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
-  } catch (analyticsErr) {
-    if (analyticsErr.message && analyticsErr.message.includes('ENOTFOUND')) {
-      console.warn(`[FBO stocks] Analytics API ENOTFOUND → Statistics API...`);
-    } else {
-      console.warn(`[FBO stocks] Analytics API (${analyticsErr.message}), → Statistics API...`);
-    }
-  }
-
-  // === Попытка 2: Statistics API (устарел, отключается 23.06.2026) ===
-  let statsErr429 = false;
-  try {
-    const data = await apiRequest('GET', WB_STATISTICS_API,
-      '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
-    const rows = Array.isArray(data) ? data : [];
-    console.log(`[FBO stocks] Statistics fallback: ${rows.length} строк`);
-    _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
-    return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
-  } catch (statErr) {
-    statsErr429 = statErr.status === 429 || (statErr.message || '').includes('429');
-    if (!statsErr429) {
-      console.error(`[FBO stocks] Оба API недоступны`);
-      throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
-    }
-    console.warn(`[FBO stocks] Statistics 429 → trying via proxy...`);
-  }
-
-  // === Попытка 3: Statistics API через session JWT (authorizev3) при 429 ===
-  if (statsErr429 && sessionToken) {
+  // Запускаем запрос и сохраняем в inflight для дедупликации
+  _fboInflight = (async () => {
     try {
-      const res = await axios.get(
-        `${WB_STATISTICS_API}/api/v1/supplier/stocks?dateFrom=2019-01-01`,
-        {
-          headers: {
-            'Authorizev3': sessionToken,
-            'Accept': 'application/json',
-            'Origin': 'https://seller.wildberries.ru',
-          },
-          validateStatus: () => true,
-          timeout: 15000,
+      // === Попытка 1: Analytics API напрямую ===
+      try {
+        const response = await apiRequest('POST', WB_ANALYTICS_API,
+          '/api/analytics/v1/stocks-report/wb-warehouses', token, analyticsBody);
+        const rows = response?.data || response?.stocks || [];
+        console.log(`[FBO stocks] Analytics API direct: ${rows.length} строк`);
+        _fboCache.data = rows; _fboCache.ts = Date.now(); _fboCache.key = cacheKey;
+        return rows;
+      } catch (analyticsErr) {
+        if (analyticsErr.message && analyticsErr.message.includes('ENOTFOUND')) {
+          console.warn(`[FBO stocks] Analytics API ENOTFOUND → Statistics API...`);
+        } else {
+          console.warn(`[FBO stocks] Analytics API (${analyticsErr.message}), → Statistics API...`);
         }
-      );
-      if (res.status === 200 && Array.isArray(res.data)) {
-        const rows = res.data;
-        console.log(`[FBO stocks] Statistics via session JWT: ${rows.length} строк`);
-        _fboCache.data = rows; _fboCache.ts = now; _fboCache.key = cacheKey;
-        return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
       }
-      console.warn(`[FBO stocks] Statistics session JWT → ${res.status}`);
-    } catch(e) {
-      console.warn(`[FBO stocks] Statistics session JWT error: ${e.message}`);
-    }
-  }
 
-  console.error(`[FBO stocks] Все источники недоступны (Statistics 429)`);
-  throw new Error('Statistics API временно недоступен (rate limit). Попробуйте позже.');
+      // === Попытка 2: Statistics API ===
+      let statsErr429 = false;
+      try {
+        const data = await apiRequest('GET', WB_STATISTICS_API,
+          '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
+        const rows = Array.isArray(data) ? data : [];
+        console.log(`[FBO stocks] Statistics fallback: ${rows.length} строк`);
+        _fboCache.data = rows; _fboCache.ts = Date.now(); _fboCache.key = cacheKey;
+        return rows;
+      } catch (statErr) {
+        statsErr429 = statErr.status === 429 || (statErr.message || '').includes('429');
+        if (!statsErr429) {
+          throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
+        }
+        console.warn(`[FBO stocks] Statistics 429 → trying via session JWT...`);
+      }
+
+      // === Попытка 3: Statistics API через session JWT ===
+      if (statsErr429 && sessionToken) {
+        try {
+          const res = await axios.get(
+            `${WB_STATISTICS_API}/api/v1/supplier/stocks?dateFrom=2019-01-01`,
+            { headers: { 'Authorizev3': sessionToken, 'Accept': 'application/json' },
+              validateStatus: () => true, timeout: 15000 }
+          );
+          if (res.status === 200 && Array.isArray(res.data)) {
+            const rows = res.data;
+            console.log(`[FBO stocks] Statistics via session JWT: ${rows.length} строк`);
+            _fboCache.data = rows; _fboCache.ts = Date.now(); _fboCache.key = cacheKey;
+            return rows;
+          }
+          console.warn(`[FBO stocks] Statistics session JWT → ${res.status}`);
+        } catch(e) {
+          console.warn(`[FBO stocks] Statistics session JWT error: ${e.message}`);
+        }
+      }
+
+      console.error(`[FBO stocks] Все источники недоступны (Statistics 429)`);
+      throw new Error('Statistics API временно недоступен (rate limit). Попробуйте позже.');
+    } finally {
+      _fboInflight = null;
+    }
+  })();
+
+  const rows = await _fboInflight;
+  return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
 }
 
 /**
