@@ -238,7 +238,7 @@ async function getArticleByNmId(token, nmId) {
  */
 // ─── Кеш FBO остатков (избегаем rate limit Statistics API 1 req/min) ─────────
 const _fboCache = { data: null, ts: 0, key: '' };
-const FBO_CACHE_TTL = 90 * 1000; // 90 секунд
+const FBO_CACHE_TTL = 10 * 60 * 1000; // 10 минут — Statistics API лимит 1 req/min
 let _fboInflight = null; // Дедупликация: если запрос уже летит — ждём его
 
 async function getFboStocksRaw(token, nmIds = null, sessionToken = null, sessionCookies = null) {
