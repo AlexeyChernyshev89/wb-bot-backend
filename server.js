@@ -1376,9 +1376,9 @@ async function setupBot() {
 
 const WORKER_INTERVAL    = 10_000;  // 10 сек между циклами
 const API_DELAY          = 300;     // 300 мс между запросами к WB API (≤300 req/min)
-const RETRY_409_DELAY    = 5 * 60_000;   // 5 мин — WB открывает слоты несколько раз в день
+const RETRY_409_DELAY    = 2 * 60_000;   // 2 мин — проверяем слоты часто
 const RETRY_UNKNOWN_DELAY= 60_000;  // 60 сек повтор при неизвестной ошибке
-const MAX_RETRY_COUNT    = 288;     // 288 × 5 мин = 24 часа
+const MAX_RETRY_COUNT    = 720;     // 720 × 2 мин = 24 часа
 
 let workerRunning = false;
 const userRateLimits = {};  // { telegramId → timestamp до которого нельзя делать запросы }
