@@ -1520,8 +1520,17 @@ async function executeRedistribution(wbToken, req) {
 
   if (!sessionToken) {
     const e = new Error(
-      'Сессионный токен не задан. Откройте Mini App → Обновить токен WB → ' +
-      'вставьте Authorizev3 из DevTools (seller.wildberries.ru → F12 → Network)'
+      'Сессионный токен не задан. Авторизуйтесь в Mini App через SMS'
+    );
+    e.status = 400;
+    throw e;
+  }
+
+  // Проверяем что токен - RS256 сессионный JWT (не публичный ES256)
+  // Публичный токен начинается с eyJhbGciOiJFUzI1NiIs, сессионный - eyJhbGciOiJSUzI1NiIs
+  if (sessionToken.startsWith('eyJhbGciOiJFUzI1NiIs')) {
+    const e = new Error(
+      'Нужна повторная SMS авторизация — сессионный токен не найден'
     );
     e.status = 400;
     throw e;
