@@ -1037,6 +1037,20 @@ app.post('/auth/verify-sms', telegramAuth, requireDB, async (req, res) => {
       return res.status(400).json({ success: false, error: result.error });
     }
 
+    // Валидируем что получили реальный RS256 JWT от Puppeteer прокси
+    // (не null, не phone:+7..., не ES256 публичный токен)
+    const isValidJWT = result.sessionToken &&
+      result.sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs') &&
+      result.sessionToken.length > 100;
+
+    if (!isValidJWT) {
+      console.warn('[verify-sms] ❌ Invalid token type:', result.sessionToken ? result.sessionToken.substring(0,30) : 'NULL');
+      return res.status(400).json({
+        success: false,
+        error: 'Не получилось получить JWT токен. Убедитесь что Windows прокси запущен (node C:\\wb-proxy\\proxy.js)'
+      });
+    }
+
     // Сохраняем сессионный токен (Authorizev3) в users
     console.log('[verify-sms] saving token for', req.telegramId,
       '| sessionToken:', result.sessionToken ? result.sessionToken.substring(0,30)+'...' : 'NULL',
@@ -1049,6 +1063,13 @@ app.post('/auth/verify-sms', telegramAuth, requireDB, async (req, res) => {
       [req.telegramId, result.sessionToken, result.cookies || null]
     );
     console.log('[verify-sms] saved rows:', saveRes.rowCount);
+
+    // Проверяем что реально записалось
+    const checkRes = await db.query(
+      'SELECT length(wb_session_token) as tlen, length(wb_session_cookies) as clen FROM users WHERE telegram_id=$1',
+      [req.telegramId]
+    );
+    console.log('[verify-sms] DB check after save:', JSON.stringify(checkRes.rows[0]));
 
     // Удаляем временный SMS-запрос
     await db.query('DELETE FROM sms_requests WHERE telegram_id=$1', [req.telegramId]);
