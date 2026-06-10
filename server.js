@@ -1376,9 +1376,9 @@ async function setupBot() {
 
 const WORKER_INTERVAL    = 10_000;  // 10 сек между циклами
 const API_DELAY          = 300;     // 300 мс между запросами к WB API (≤300 req/min)
-const RETRY_409_DELAY    = 2 * 60_000;   // 2 мин — проверяем слоты часто
+const RETRY_409_DELAY    = 30_000;       // 30 сек — как у конкурентов (мониторинг слотов)
 const RETRY_UNKNOWN_DELAY= 60_000;  // 60 сек повтор при неизвестной ошибке
-const MAX_RETRY_COUNT    = 720;     // 720 × 2 мин = 24 часа
+const MAX_RETRY_COUNT    = 2880;    // 2880 × 30 сек = 24 часа
 
 let workerRunning = false;
 const userRateLimits = {};  // { telegramId → timestamp до которого нельзя делать запросы }
@@ -1412,22 +1412,23 @@ async function transferWorker() {
     if (!rows.length) return;
     console.log(`[worker] Цикл: ${rows.length} заявок в очереди`);
 
-    // Обрабатываем по одной на пользователя за цикл
-    const seen = new Set();
+    // Параллельная обработка всех заявок одновременно (как у конкурента)
+    // Максимум 3 заявки на пользователя за цикл чтобы не перегружать
+    const perUser = {};
+    const toProcess = [];
     for (const req of rows) {
-      if (seen.has(req.user_id)) continue;
-      seen.add(req.user_id);
-
-      // Проверяем rate-limit конкретного пользователя
+      perUser[req.user_id] = (perUser[req.user_id] || 0) + 1;
+      if (perUser[req.user_id] > 3) continue;
       const rateUntil = userRateLimits[req.user_id];
       if (rateUntil && Date.now() < rateUntil) {
         console.log(`[worker] User ${req.user_id} rate-limited, пропускаем`);
         continue;
       }
-
-      await processRequest(req);
-      await sleep(API_DELAY);
+      toProcess.push(req);
     }
+
+    // Все параллельно — не ждём завершения одной чтобы начать другую
+    await Promise.allSettled(toProcess.map(req => processRequest(req)));
   } catch (err) {
     console.error('[worker] Критическая ошибка цикла:', err.message);
   } finally {
@@ -1530,6 +1531,7 @@ async function executeRedistribution(wbToken, req) {
   let limitsData;
   try {
     limitsData = await getTransferAvailableLimits(sessionToken, req.sku, sessionCookies);
+    console.log(`[worker] AvailableLimits raw:`, JSON.stringify(limitsData).substring(0, 200));
   } catch (err) {
     if (err.sessionExpired) {
       const e = new Error('Сессионный токен истёк. Обновите Authorizev3 в разделе «Обновить токен WB»');
