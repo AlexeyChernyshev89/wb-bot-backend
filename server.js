@@ -1562,6 +1562,13 @@ async function executeRedistribution(wbToken, req) {
   try {
     limitsData = await getTransferAvailableLimits(sessionToken, req.sku, sessionCookies);
     console.log(`[worker] AvailableLimits raw:`, JSON.stringify(limitsData).substring(0, 200));
+
+    // Пустой ответ = сессия истекла, нужна повторная SMS авторизация
+    if (!limitsData || limitsData === '' || (typeof limitsData === 'object' && Object.keys(limitsData).length === 0)) {
+      const e = new Error('Сессия истекла. Авторизуйтесь снова через SMS в Mini App.');
+      e.status = 401;
+      throw e;
+    }
   } catch (err) {
     if (err.sessionExpired) {
       const e = new Error('Сессионный токен истёк. Обновите Authorizev3 в разделе «Обновить токен WB»');
