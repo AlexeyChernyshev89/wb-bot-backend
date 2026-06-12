@@ -10,7 +10,6 @@ const https  = require('https');
 
 // Принудительный IPv4 для WB API — Railway EU использует IPv6 по умолчанию,
 // но WB API (marketplace-api.wildberries.ru) не принимает IPv6.
-// Кастомный lookup: всегда возвращает IPv4 адрес.
 function _ipv4Lookup(hostname, options, callback) {
   dns.lookup(hostname, { ...options, family: 4 }, callback);
 }
@@ -20,6 +19,14 @@ console.log('[wb-api] IPv4-only HTTPS agent initialized');
 const WB_MARKETPLACE_API = 'https://marketplace-api.wildberries.ru';
 const WB_CONTENT_API     = 'https://content-api.wildberries.ru';
 const WB_STATISTICS_API  = 'https://statistics-api.wildberries.ru';
+// Новый Analytics API (ENOTFOUND с Railway EU — используем через Windows-прокси)
+const WB_ANALYTICS_API   = 'https://analytics-api.wildberries.ru';
+
+// Windows-прокси URL (ngrok / Cloudflare Tunnel)
+// Все вызовы к analytics-api.wildberries.ru идут через него
+function getProxyUrl() {
+  return process.env.YANDEX_FN_URL || '';
+}
 
 /**
  * Базовый HTTP-клиент для WB API с обработкой ошибок.
@@ -31,20 +38,18 @@ async function apiRequest(method, baseUrl, path, token, data = null, params = nu
       url: `${baseUrl}${path}`,
       headers: {
         'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
       data,
       params,
       timeout: 15000,
-      httpsAgent: WB_AGENT,   // принудительный IPv4 — WB API не принимает IPv6
+      httpsAgent: WB_AGENT,
     });
     return response.data;
   } catch (error) {
     const status  = error.response?.status;
     const detail  = error.response?.data?.detail || error.response?.data?.message || error.message;
     console.error(`❌ WB API [${method} ${path}] ${status}:`, detail);
-
-    // Пробрасываем структурированную ошибку
     const err = new Error(detail || 'Ошибка WB API');
     err.status = status;
     err.wbDetail = detail;
@@ -57,8 +62,6 @@ async function apiRequest(method, baseUrl, path, token, data = null, params = nu
 /**
  * Получить список складов продавца.
  * GET /api/v3/warehouses
- * Категория токена: Marketplace
- * @returns {Array} массив объектов склада { id, name, officeId, ... }
  */
 async function getWarehouses(token) {
   return apiRequest('GET', WB_MARKETPLACE_API, '/api/v3/warehouses', token);
@@ -67,24 +70,16 @@ async function getWarehouses(token) {
 // ─── Остатки ──────────────────────────────────────────────────────────────────
 
 /**
- * Получить остатки товаров на складе продавца по списку SKU (баркодов).
+ * Получить остатки товаров на складе продавца по списку SKU.
  * POST /api/v3/stocks/{warehouseId}
- * Категория токена: Marketplace
- * @param {string} token
- * @param {number} warehouseId — ID склада продавца (из getWarehouses)
- * @param {string[]} skus — массив баркодов (до 1000 штук за запрос)
- * @returns {{ stocks: Array<{ sku: string, amount: number }> }}
  */
 async function getStocks(token, warehouseId, skus) {
   if (!Array.isArray(skus) || skus.length === 0) {
     throw new Error('Список SKU не может быть пустым');
   }
-  // API принимает до 1000 SKU за раз — при необходимости разбиваем на батчи
   if (skus.length <= 1000) {
     return apiRequest('POST', WB_MARKETPLACE_API, `/api/v3/stocks/${warehouseId}`, token, { skus });
   }
-
-  // Батчевая обработка
   const results = { stocks: [] };
   for (let i = 0; i < skus.length; i += 1000) {
     const batch = skus.slice(i, i + 1000);
@@ -94,86 +89,44 @@ async function getStocks(token, warehouseId, skus) {
   return results;
 }
 
-/**
- * Обновить остатки товаров на складе продавца.
- * PUT /api/v3/stocks/{warehouseId}
- * Категория токена: Marketplace
- * @param {string} token
- * @param {number} warehouseId
- * @param {Array<{ sku: string, amount: number }>} stocks
- */
 async function updateStocks(token, warehouseId, stocks) {
-  if (!Array.isArray(stocks) || stocks.length === 0) {
-    throw new Error('Список остатков не может быть пустым');
-  }
-  // API принимает до 1000 записей за раз
-  if (stocks.length <= 1000) {
-    return apiRequest('PUT', WB_MARKETPLACE_API, `/api/v3/stocks/${warehouseId}`, token, { stocks });
-  }
-
+  if (!Array.isArray(stocks) || stocks.length === 0) throw new Error('Список остатков не может быть пустым');
+  if (stocks.length <= 1000) return apiRequest('PUT', WB_MARKETPLACE_API, `/api/v3/stocks/${warehouseId}`, token, { stocks });
   for (let i = 0; i < stocks.length; i += 1000) {
-    const batch = stocks.slice(i, i + 1000);
-    await apiRequest('PUT', WB_MARKETPLACE_API, `/api/v3/stocks/${warehouseId}`, token, { stocks: batch });
+    await apiRequest('PUT', WB_MARKETPLACE_API, `/api/v3/stocks/${warehouseId}`, token, { stocks: stocks.slice(i, i + 1000) });
   }
   return { success: true };
 }
 
-/**
- * Удалить остатки (обнулить) по списку SKU на складе.
- * DELETE /api/v3/stocks/{warehouseId}
- * Категория токена: Marketplace
- */
 async function deleteStocks(token, warehouseId, skus) {
   return apiRequest('DELETE', WB_MARKETPLACE_API, `/api/v3/stocks/${warehouseId}`, token, { skus });
 }
 
 // ─── Карточки товаров ─────────────────────────────────────────────────────────
 
-/**
- * Получить список карточек товаров (nmId, vendorCode, баркоды).
- * POST /content/v2/get/cards/list
- * Категория токена: Content
- * Используется для получения всех баркодов товаров продавца.
- * @param {string} token
- * @param {string|null} cursor — курсор для пагинации (null для первой страницы)
- * @param {number} limit — количество карточек (макс. 100)
- */
 async function getCardsList(token, cursor = null, limit = 100) {
   const body = {
     settings: {
       cursor: cursor ? { updatedAt: cursor.updatedAt, nmID: cursor.nmID } : {},
-      filter: { withPhoto: -1 }
-    }
+      filter: { withPhoto: -1 },
+    },
   };
   return apiRequest('POST', WB_CONTENT_API, '/content/v2/get/cards/list', token, body);
 }
 
-/**
- * Получить ВСЕ карточки товаров продавца (обходит пагинацию автоматически).
- * Возвращает массив карточек с баркодами.
- */
 async function getAllCards(token) {
   const allCards = [];
   let cursor = null;
-
   while (true) {
     const response = await getCardsList(token, cursor, 100);
     const cards = response?.cards || [];
     allCards.push(...cards);
-
-    // Проверяем есть ли ещё страницы
     if (!response?.cursor || cards.length < 100) break;
     cursor = response.cursor;
   }
-
   return allCards;
 }
 
-/**
- * Извлечь все баркоды из списка карточек.
- * @param {Array} cards — результат getAllCards()
- * @returns {string[]} массив баркодов
- */
 function extractSkusFromCards(cards) {
   const skus = [];
   for (const card of cards) {
@@ -183,20 +136,11 @@ function extractSkusFromCards(cards) {
       }
     }
   }
-  return [...new Set(skus)]; // дедупликация
+  return [...new Set(skus)];
 }
 
-
-/**
- * Получить название и баркоды товара по nmId (артикул WB).
- * POST /content/v2/get/cards/list с фильтром по nmID
- */
 async function getArticleByNmId(token, nmId) {
   const target = parseInt(nmId);
-
-  // Перебираем варианты фильтров WB Content API:
-  // 1. nmIDs — официальный параметр для фильтрации по nmID (если поддерживается)
-  // 2. textSearch — поиск по тексту, ищет по артикулу среди карточек продавца
   const filters = [
     { nmIDs: [target], withPhoto: -1 },
     { textSearch: String(nmId), withPhoto: -1 },
@@ -205,13 +149,10 @@ async function getArticleByNmId(token, nmId) {
   for (const filter of filters) {
     try {
       const response = await apiRequest('POST', WB_CONTENT_API, '/content/v2/get/cards/list', token, {
-        settings: { cursor: { limit: 100 }, filter }
+        settings: { cursor: { limit: 100 }, filter },
       });
-
       const cards = response?.cards || [];
       console.log(`[article search] filter=${JSON.stringify(filter)} cards=${cards.length}`);
-
-      // ВАЖНО: проверяем точное совпадение nmID, не берём первую попавшуюся карточку
       const card = cards.find(c => c.nmID === target);
       if (card) {
         const skus = extractSkusFromCards([card]);
@@ -219,7 +160,7 @@ async function getArticleByNmId(token, nmId) {
         console.log(`[article search] found: nmID=${card.nmID} name="${name}" skus=${skus.length}`);
         return { nmId: target, name, skus };
       }
-    } catch(err) {
+    } catch (err) {
       console.error(`[article search] filter attempt failed:`, err.message);
     }
   }
@@ -228,32 +169,91 @@ async function getArticleByNmId(token, nmId) {
   return null;
 }
 
-/**
- * Получить FBO остатки товара по всем складам WB через Statistics API.
- * GET /api/v1/supplier/stocks — возвращает остатки на складах WB (FBO).
- *
- * ВАЖНО: токен должен иметь категорию «Статистика» (Statistics).
- * Поля ответа: warehouseName, nmId, quantity (доступно к продаже),
- *              quantityFull (полный остаток включая в пути), inWayToClient, inWayFromClient.
- */
-// ─── Кеш FBO остатков (избегаем rate limit Statistics API 1 req/min) ─────────
+// ─── Кеш FBO остатков ────────────────────────────────────────────────────────
+// Новый Analytics API лимит: 1 запрос / 20 секунд → кеш 10 минут более чем достаточно
 const _fboCache = { data: null, ts: 0, key: '' };
-const FBO_CACHE_TTL = 10 * 60 * 1000; // 10 минут — Statistics API лимит 1 req/min
-let _fboInflight = null; // Дедупликация: если запрос уже летит — ждём его
+const FBO_CACHE_TTL = 10 * 60 * 1000; // 10 минут
+let _fboInflight = null;
 
+/**
+ * Вызов нового Analytics API через Windows-прокси (/wb-call).
+ * analytics-api.wildberries.ru недоступен с Railway EU (DNS ENOTFOUND),
+ * но доступен с Windows IP через ngrok/Cloudflare Tunnel.
+ */
+async function analyticsViaProxy(token, body) {
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl) {
+    throw new Error('YANDEX_FN_URL не задан — Windows-прокси недоступен');
+  }
+  const res = await axios.post(
+    `${proxyUrl}/wb-call`,
+    {
+      url: `${WB_ANALYTICS_API}/api/analytics/v1/stocks-report/wb-warehouses`,
+      method: 'POST',
+      token,   // прокси подставит как Authorization: Bearer
+      body,
+    },
+    { timeout: 30000, validateStatus: () => true }
+  );
+  console.log(`[FBO stocks] Analytics via proxy → HTTP ${res.status}`);
+  if (res.status !== 200) {
+    const err = new Error(`Analytics proxy HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  // Прокси оборачивает в { status, data } — достаём data
+  const inner = res.data?.data ?? res.data;
+  return inner?.data || inner?.stocks || inner || [];
+}
+
+/**
+ * Прямой вызов Analytics API (на случай если Railway когда-нибудь починит DNS).
+ */
+async function analyticsDirectly(token, body) {
+  const response = await apiRequest('POST', WB_ANALYTICS_API,
+    '/api/analytics/v1/stocks-report/wb-warehouses', token, body);
+  return response?.data || response?.stocks || [];
+}
+
+/**
+ * Нормализует строки Statistics API в единый формат.
+ * Statistics возвращает: { nmId, warehouseName, quantity, quantityFull, ... }
+ * Analytics возвращает:  { nmId, warehouseName, quantity, warehouseId, ... }
+ * Формат совпадает — нормализация минимальная.
+ */
+function normalizeStocksRow(row) {
+  return {
+    nmId:          row.nmId          || row.nmID          || 0,
+    warehouseName: row.warehouseName || row.officeName     || '',
+    warehouseId:   row.warehouseId   || row.warehouseID   || null,
+    quantity:      row.quantity      ?? row.qty            ?? 0,
+    quantityFull:  row.quantityFull  ?? row.quantityTotal  ?? 0,
+  };
+}
+
+/**
+ * Получить FBO-остатки по всем складам WB.
+ *
+ * Порядок источников (от лучшего к худшему):
+ *   1. Новый Analytics API через Windows-прокси — лимит 1/20с, 250 000 строк
+ *   2. Новый Analytics API напрямую — на случай если Railway починит DNS
+ *   3. Statistics API (старый) — умирает 23.06.2026, лимит 1/мин
+ *   4. Statistics API через session JWT — когда публичный токен заблокирован 429
+ *
+ * Кеш 10 минут + дедупликация inflight-запросов.
+ */
 async function getFboStocksRaw(token, nmIds = null, sessionToken = null, sessionCookies = null) {
-  const WB_ANALYTICS_API = 'https://analytics-api.wildberries.ru';
   const cacheKey = token ? token.substring(0, 20) : '';
   const now = Date.now();
 
-  // Возвращаем кеш если он свежий (< 90 сек)
+  // Возвращаем кеш если свежий
   if (_fboCache.data && _fboCache.key === cacheKey && now - _fboCache.ts < FBO_CACHE_TTL) {
     const rows = _fboCache.data;
     console.log(`[FBO stocks] Cache hit: ${rows.length} строк`);
     return nmIds ? rows.filter(r => nmIds.includes(r.nmId)) : rows;
   }
 
-  // Если уже есть запрос в полёте — ждём его результата (дедупликация)
+  // Ждём если запрос уже летит (дедупликация)
   if (_fboInflight) {
     console.log(`[FBO stocks] Waiting for inflight request...`);
     const rows = await _fboInflight;
@@ -263,64 +263,85 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
   const analyticsBody = { pagination: { limit: 250000, offset: 0 } };
   if (nmIds && nmIds.length > 0) analyticsBody.filter = { nmIDs: nmIds };
 
-  // Запускаем запрос и сохраняем в inflight для дедупликации
   _fboInflight = (async () => {
     try {
-      // === Попытка 1: Analytics API напрямую ===
+
+      // ── Источник 1: Analytics API через Windows-прокси ──────────────────────
       try {
-        const response = await apiRequest('POST', WB_ANALYTICS_API,
-          '/api/analytics/v1/stocks-report/wb-warehouses', token, analyticsBody);
-        const rows = response?.data || response?.stocks || [];
-        console.log(`[FBO stocks] Analytics API direct: ${rows.length} строк`);
-        _fboCache.data = rows; _fboCache.ts = Date.now(); _fboCache.key = cacheKey;
-        return rows;
-      } catch (analyticsErr) {
-        if (analyticsErr.message && analyticsErr.message.includes('ENOTFOUND')) {
-          console.warn(`[FBO stocks] Analytics API ENOTFOUND → Statistics API...`);
+        const rows = await analyticsViaProxy(token, analyticsBody);
+        const normalized = rows.map(normalizeStocksRow);
+        console.log(`[FBO stocks] ✅ Analytics API (proxy): ${normalized.length} строк`);
+        _fboCache.data = normalized; _fboCache.ts = Date.now(); _fboCache.key = cacheKey;
+        return normalized;
+      } catch (proxyErr) {
+        console.warn(`[FBO stocks] Analytics proxy failed: ${proxyErr.message} → trying direct...`);
+      }
+
+      // ── Источник 2: Analytics API напрямую (Railway DNS может починить) ─────
+      try {
+        const rows = await analyticsDirectly(token, analyticsBody);
+        const normalized = rows.map(normalizeStocksRow);
+        console.log(`[FBO stocks] ✅ Analytics API (direct): ${normalized.length} строк`);
+        _fboCache.data = normalized; _fboCache.ts = Date.now(); _fboCache.key = cacheKey;
+        return normalized;
+      } catch (directErr) {
+        if (directErr.message && directErr.message.includes('ENOTFOUND')) {
+          console.warn(`[FBO stocks] Analytics direct ENOTFOUND → Statistics API...`);
         } else {
-          console.warn(`[FBO stocks] Analytics API (${analyticsErr.message}), → Statistics API...`);
+          console.warn(`[FBO stocks] Analytics direct failed (${directErr.message}) → Statistics API...`);
         }
       }
 
-      // === Попытка 2: Statistics API ===
+      // ── Источник 3: Statistics API (устаревший, умирает 23.06.2026) ─────────
       let statsErr429 = false;
       try {
         const data = await apiRequest('GET', WB_STATISTICS_API,
           '/api/v1/supplier/stocks?dateFrom=2019-01-01', token);
-        const rows = Array.isArray(data) ? data : [];
-        console.log(`[FBO stocks] Statistics fallback: ${rows.length} строк`);
+        const rows = (Array.isArray(data) ? data : []).map(normalizeStocksRow);
+        console.log(`[FBO stocks] ✅ Statistics API: ${rows.length} строк`);
         _fboCache.data = rows; _fboCache.ts = Date.now(); _fboCache.key = cacheKey;
         return rows;
       } catch (statErr) {
         statsErr429 = statErr.status === 429 || (statErr.message || '').includes('429');
         if (!statsErr429) {
-          throw new Error('Нет доступа к остаткам. Добавьте категории «Аналитика» и «Статистика» в токен WB.');
+          // Не 429 — значит нет прав или другая критическая ошибка
+          throw new Error('Нет доступа к остаткам. Добавьте категорию «Аналитика» в токен WB.');
         }
         console.warn(`[FBO stocks] Statistics 429 → trying via session JWT...`);
       }
 
-      // === Попытка 3: Statistics API через session JWT ===
-      if (statsErr429 && sessionToken) {
+      // ── Источник 4: Statistics API через сессионный JWT ──────────────────────
+      if (statsErr429 && sessionToken && sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs')) {
         try {
           const res = await axios.get(
             `${WB_STATISTICS_API}/api/v1/supplier/stocks?dateFrom=2019-01-01`,
-            { headers: { 'Authorizev3': sessionToken, 'Accept': 'application/json' },
-              validateStatus: () => true, timeout: 15000 }
+            {
+              headers: { 'Authorizev3': sessionToken, 'Accept': 'application/json' },
+              validateStatus: () => true,
+              timeout: 15000,
+            }
           );
           if (res.status === 200 && Array.isArray(res.data)) {
-            const rows = res.data;
-            console.log(`[FBO stocks] Statistics via session JWT: ${rows.length} строк`);
+            const rows = res.data.map(normalizeStocksRow);
+            console.log(`[FBO stocks] ✅ Statistics via session JWT: ${rows.length} строк`);
             _fboCache.data = rows; _fboCache.ts = Date.now(); _fboCache.key = cacheKey;
             return rows;
           }
           console.warn(`[FBO stocks] Statistics session JWT → ${res.status}`);
-        } catch(e) {
+        } catch (e) {
           console.warn(`[FBO stocks] Statistics session JWT error: ${e.message}`);
         }
       }
 
-      console.error(`[FBO stocks] Все источники недоступны (Statistics 429)`);
-      throw new Error('Statistics API временно недоступен (rate limit). Попробуйте позже.');
+      // ── Все источники недоступны — возвращаем кеш если есть ─────────────────
+      if (_fboCache.data && _fboCache.key === cacheKey) {
+        console.warn(`[FBO stocks] Все источники недоступны → возвращаем устаревший кеш (${Math.round((Date.now() - _fboCache.ts) / 60000)} мин)`);
+        return _fboCache.data;
+      }
+
+      console.error(`[FBO stocks] Все источники недоступны, кеша нет`);
+      throw new Error('Остатки временно недоступны. Попробуйте позже.');
+
     } finally {
       _fboInflight = null;
     }
@@ -331,14 +352,12 @@ async function getFboStocksRaw(token, nmIds = null, sessionToken = null, session
 }
 
 /**
- * Получить список уникальных WB FBO складов из Statistics API.
- * Возвращает массив названий складов WB (не собственные склады продавца).
+ * Получить список уникальных WB FBO складов.
  */
-async function getWbFboWarehouseNames(token) {
+async function getWbFboWarehouseNames(token, sessionToken = null, sessionCookies = null) {
   try {
-    const allStocks = await getFboStocksRaw(token);
+    const allStocks = await getFboStocksRaw(token, null, sessionToken, sessionCookies);
     const rows = Array.isArray(allStocks) ? allStocks : [];
-    // Фильтруем системные строки (в пути, возвраты) — берём только реальные склады
     const excluded = ['в пути', 'in transit', 'возврат', 'return', 'к клиенту', 'от клиента'];
     const names = new Set();
     for (const item of rows) {
@@ -348,25 +367,21 @@ async function getWbFboWarehouseNames(token) {
       if (!isSystem) names.add(wh);
     }
     return [...names].sort((a, b) => a.localeCompare(b, 'ru'));
-  } catch(err) {
-    console.warn('[getWbFboWarehouseNames] Statistics API error:', err.message);
+  } catch (err) {
+    console.warn('[getWbFboWarehouseNames] error:', err.message);
     return [];
   }
 }
 
 /**
- * Получить склады с ненулевыми FBO остатками для конкретного артикула.
- * Возвращает: { article: { nmId, name }, warehouses: [{ name, amount }] }
- *
- * Стратегия:
- * 1. Statistics API — точные FBO остатки по складам WB (требует категорию Statistics в токене)
- * 2. Fallback: Marketplace API /api/v3/stocks (FBS, склады продавца) — если Statistics недоступен
+ * Получить склады с ненулевыми FBO-остатками для конкретного артикула.
+ * Возвращает: { article: { nmId, name }, warehouses: [{ name, amount }], source }
  */
 async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null) {
   const target = parseInt(nmId);
   const article = await getArticleByNmId(token, nmId);
 
-  // === Попытка 1: Transfer API (seller-supply) — самый точный источник ===
+  // === Попытка 1: Transfer API (seller-supply) ===
   if (sessionToken) {
     try {
       const resp = await sellerSupplyPost(sessionToken, '/list', {}, sessionCookies);
@@ -383,25 +398,22 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
           .filter(w => w.amount > 0)
           .sort((a, b) => b.amount - a.amount);
         console.log(`[stocks] Transfer API: nmId=${nmId} в ${warehouses.length} складах`);
-        const articleInfo = article || { nmId: target, name: `Артикул ${nmId}`, skus: [] };
-        return { article: articleInfo, warehouses, source: 'transfer_api' };
+        return { article: article || { nmId: target, name: `Артикул ${nmId}`, skus: [] }, warehouses, source: 'transfer_api' };
       }
       console.log(`[stocks] Transfer API: nmId=${nmId} не найден в transfer/list`);
-    } catch(e) {
+    } catch (e) {
       console.warn('[stocks] Transfer API failed:', e.message);
     }
   }
 
-  // === Попытка 2: Statistics API (FBO) ===
+  // === Попытка 2: FBO через новый Analytics API (или Statistics fallback) ===
   try {
     const allStocks = await getFboStocksRaw(token, [target], sessionToken, sessionCookies);
     const rows = Array.isArray(allStocks) ? allStocks : [];
-    console.log(`[stocks] Statistics API: total rows=${rows.length}`);
+    console.log(`[stocks] FBO API: total rows=${rows.length}`);
     const byWarehouse = {};
     for (const item of rows) {
       if (item.nmId !== target) continue;
-      // quantity = доступно к заказу (физически на складе)
-      // quantityFull включает товар "в пути" — даёт ложные остатки на других складах
       const qty = item.quantity || 0;
       if (qty <= 0) continue;
       const wh = item.warehouseName;
@@ -411,26 +423,29 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
     const warehouses = Object.entries(byWarehouse)
       .map(([name, amount]) => ({ name, amount }))
       .sort((a, b) => b.amount - a.amount);
-    console.log(`[stocks] Statistics API: nmId=${nmId} в ${warehouses.length} складах`);
-    const articleInfo = article || { nmId: target, name: `Артикул ${nmId}`, skus: [] };
-    return { article: articleInfo, warehouses, source: 'statistics' };
-  } catch (statErr) {
-    console.warn(`[stocks] Statistics API failed: ${statErr.message}`);
+    console.log(`[stocks] FBO API: nmId=${nmId} в ${warehouses.length} складах`);
+    return {
+      article: article || { nmId: target, name: `Артикул ${nmId}`, skus: [] },
+      warehouses,
+      source: 'analytics',
+    };
+  } catch (fboErr) {
+    console.warn(`[stocks] FBO API failed: ${fboErr.message}`);
     if (!article || !article.skus.length) {
       const err = new Error(
-        statErr.status === 401 || statErr.status === 403
-          ? 'Нет доступа к Statistics API. Добавьте категорию «Статистика» в токен WB.'
+        fboErr.status === 401 || fboErr.status === 403
+          ? 'Нет доступа к Analytics API. Добавьте категорию «Аналитика» в токен WB.'
           : 'Не удалось получить остатки. Проверьте права токена.'
       );
-      err.hint = 'statistics_token_required';
+      err.hint = 'analytics_token_required';
       throw err;
     }
-    // === Fallback: Marketplace API (FBS) ===
+
+    // === Fallback: Marketplace API FBS ===
     const allWarehouses = await getWarehouses(token);
     const result = [];
-    const batchSize = 5;
-    for (let i = 0; i < allWarehouses.length; i += batchSize) {
-      const batch = allWarehouses.slice(i, i + batchSize);
+    for (let i = 0; i < allWarehouses.length; i += 5) {
+      const batch = allWarehouses.slice(i, i + 5);
       await Promise.all(batch.map(async wh => {
         try {
           const stocks = await getStocks(token, wh.id, article.skus);
@@ -443,6 +458,8 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
     return { article, warehouses: result, source: 'marketplace_fallback' };
   }
 }
+
+// ─── seller-supply (внутренний WB API) ───────────────────────────────────────
 
 const WB_SELLER_SUPPLY = 'https://seller-supply.wildberries.ru';
 const TRANSFER_PATH    = '/ns/goods-return/supply-manager/api/v1/transfer';
@@ -470,7 +487,7 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
       body,
       { headers, timeout: 15000, validateStatus: () => true }
     );
-    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${JSON.stringify(res.data).substring(0,100)}`);
+    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${JSON.stringify(res.data).substring(0, 100)}`);
     if (res.status === 401 || res.status === 403) {
       const e = new Error(`seller-supply ${endpoint} вернул ${res.status}`);
       e.sessionExpired = true;
@@ -480,10 +497,10 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
   } catch (err) {
     const status = err.response?.status;
     const detail = err.response?.data;
-    console.error(`[seller-supply] ${endpoint} → ${status}:`, JSON.stringify(detail));
-    const e = new Error(
-      detail?.message || detail?.error || detail?.detail || `Ошибка seller-supply API ${status}`
-    );
+    if (!err.sessionExpired) {
+      console.error(`[seller-supply] ${endpoint} → ${status}:`, JSON.stringify(detail));
+    }
+    const e = new Error(detail?.message || detail?.error || detail?.detail || `Ошибка seller-supply API ${status}`);
     e.status = status;
     e.wbDetail = detail;
     if (status === 401 || status === 403) e.sessionExpired = true;
@@ -494,20 +511,14 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
 /**
  * Получить список складов с доступными лимитами для артикула.
  * POST /transfer/AvailableLimits
- * Возвращает: массив складов с полями officeId, officeName, available (bool), qty
  */
 async function getTransferAvailableLimits(sessionToken, nmId, sessionCookies = null) {
   return sellerSupplyPost(sessionToken, '/AvailableLimits', { nmId: Number(nmId) }, sessionCookies);
 }
 
 /**
- * Создать запрос на FBO-перемещение товара между складами WB.
+ * Создать FBO-перемещение.
  * POST /transfer
- * @param {string} sessionToken - Authorizev3 JWT из ЛК продавца
- * @param {number} nmId         - Артикул WB (nmId)
- * @param {number} fromOfficeId - ID склада-источника (из AvailableLimits)
- * @param {number} toOfficeId   - ID склада-назначения
- * @param {number} amount       - Количество единиц
  */
 async function createWbTransfer(sessionToken, { nmId, fromOfficeId, toOfficeId, amount }) {
   return sellerSupplyPost(sessionToken, '', {
@@ -530,5 +541,5 @@ module.exports = {
   getWarehouses, getStocks, updateStocks, deleteStocks,
   getCardsList, getAllCards, extractSkusFromCards,
   getArticleByNmId, getArticleStocks, getFboStocksRaw, getWbFboWarehouseNames,
-  getTransferAvailableLimits, createWbTransfer, getWbTransferList
+  getTransferAvailableLimits, createWbTransfer, getWbTransferList,
 };
