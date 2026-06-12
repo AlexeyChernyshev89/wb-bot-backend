@@ -188,22 +188,28 @@ async function analyticsViaProxy(token, body) {
   const res = await axios.post(
     `${proxyUrl}/wb-call`,
     {
-      url: `${WB_ANALYTICS_API}/api/analytics/v1/stocks-report/wb-warehouses`,
-      method: 'POST',
-      token,   // прокси подставит как Authorization: Bearer
+      url:      `${WB_ANALYTICS_API}/api/analytics/v1/stocks-report/wb-warehouses`,
+      method:   'POST',
+      token,
       body,
+      authType: 'bearer',   // Analytics API принимает только Authorization: Bearer
     },
     { timeout: 30000, validateStatus: () => true }
   );
-  console.log(`[FBO stocks] Analytics via proxy → HTTP ${res.status}`);
-  if (res.status !== 200) {
-    const err = new Error(`Analytics proxy HTTP ${res.status}`);
-    err.status = res.status;
+
+  // /wb-call возвращает { status: N, data: <wb_response> }
+  const wbStatus = res.data?.status ?? res.status;
+  const wbBody   = res.data?.data   ?? res.data;
+  console.log(`[FBO stocks] Analytics via proxy → HTTP ${wbStatus} | ${JSON.stringify(wbBody).substring(0, 80)}`);
+
+  if (wbStatus !== 200) {
+    const err = new Error(`Analytics proxy HTTP ${wbStatus}: ${JSON.stringify(wbBody).substring(0, 100)}`);
+    err.status = wbStatus;
     throw err;
   }
-  // Прокси оборачивает в { status, data } — достаём data
-  const inner = res.data?.data ?? res.data;
-  return inner?.data || inner?.stocks || inner || [];
+
+  // Новый Analytics API: { data: [ {nmId, warehouseName, quantity, ...} ] }
+  return wbBody?.data || wbBody?.stocks || (Array.isArray(wbBody) ? wbBody : []);
 }
 
 /**
@@ -468,6 +474,14 @@ const TRANSFER_PATH    = '/ns/goods-return/supply-manager/api/v1/transfer';
  * Базовый POST к внутреннему API seller-supply.wildberries.ru
  */
 async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookies = null) {
+  // Проверяем что токен — настоящий RS256 JWT, а не кука
+  if (!sessionToken || !sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs')) {
+    const e = new Error('Сессия истекла. Авторизуйтесь снова через SMS в Mini App.');
+    e.status = 401;
+    e.sessionExpired = true;
+    throw e;
+  }
+
   try {
     const headers = {
       Authorizev3:      sessionToken,
@@ -487,19 +501,27 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
       body,
       { headers, timeout: 15000, validateStatus: () => true }
     );
-    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${JSON.stringify(res.data).substring(0, 100)}`);
+    const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${bodyStr.substring(0, 120)}`);
+
     if (res.status === 401 || res.status === 403) {
-      const e = new Error(`seller-supply ${endpoint} вернул ${res.status}`);
+      // WB возвращает "incorrect supplier id" когда Authorizev3 — кука, а не JWT
+      const wbMsg = typeof res.data === 'string' ? res.data : (res.data?.message || res.data?.error || '');
+      const e = new Error(
+        wbMsg.includes('incorrect supplier id')
+          ? 'Сессия истекла (incorrect supplier id). Авторизуйтесь снова через SMS.'
+          : `Сессия истекла (${res.status}). Авторизуйтесь снова через SMS.`
+      );
+      e.status = 401;
       e.sessionExpired = true;
       throw e;
     }
     return res.data;
   } catch (err) {
+    if (err.sessionExpired) throw err;
     const status = err.response?.status;
     const detail = err.response?.data;
-    if (!err.sessionExpired) {
-      console.error(`[seller-supply] ${endpoint} → ${status}:`, JSON.stringify(detail));
-    }
+    console.error(`[seller-supply] ${endpoint} → ${status}:`, JSON.stringify(detail));
     const e = new Error(detail?.message || detail?.error || detail?.detail || `Ошибка seller-supply API ${status}`);
     e.status = status;
     e.wbDetail = detail;
