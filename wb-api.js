@@ -20,7 +20,7 @@ const WB_MARKETPLACE_API = 'https://marketplace-api.wildberries.ru';
 const WB_CONTENT_API     = 'https://content-api.wildberries.ru';
 const WB_STATISTICS_API  = 'https://statistics-api.wildberries.ru';
 // Новый Analytics API (ENOTFOUND с Railway EU — используем через Windows-прокси)
-const WB_ANALYTICS_API   = 'https://analytics-api.wildberries.ru';
+const WB_ANALYTICS_API   = 'https://seller-analytics-api.wildberries.ru';
 
 // Windows-прокси URL (ngrok / Cloudflare Tunnel)
 // Все вызовы к analytics-api.wildberries.ru идут через него
@@ -494,7 +494,12 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
     };
     if (sessionCookies) {
       headers['Cookie'] = sessionCookies;
-      console.log('[seller-supply] using cookies:', sessionCookies.substring(0, 60));
+      const hasSupplier = sessionCookies.includes('x-supplier-id');
+      const hasZzatw    = sessionCookies.includes('__zzatw-wb');
+      console.log(`[seller-supply] using cookies (len=${sessionCookies.length}, x-supplier-id=${hasSupplier}, __zzatw-wb=${hasZzatw}):`, sessionCookies.substring(0, 80));
+      if (!hasSupplier) {
+        console.warn('[seller-supply] ⚠️  x-supplier-id отсутствует в куках — seller-supply вернёт 401. Нужна повторная SMS авторизация.');
+      }
     }
     const res = await axios.post(
       `${WB_SELLER_SUPPLY}${TRANSFER_PATH}${endpoint}`,
