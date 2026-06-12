@@ -335,4 +335,74 @@ async function fetchAuthorizev3(sessionCookies) {
   return null;
 }
 
-module.exports = { requestSmsCode, confirmSmsCode };
+/**
+ * Декодировать WB JWT без верификации подписи.
+ * Возвращает payload или null.
+ */
+function decodeWbToken(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Проверить WB API токен реальным запросом к marketplace-api.
+ * Возвращает { success: boolean, error?: string, info?: object }
+ */
+async function validateWbToken(token) {
+  if (!token || token.length < 50) {
+    return { success: false, error: 'Токен слишком короткий. Скопируйте полный токен из ЛК WB.' };
+  }
+
+  // Базовая проверка формата JWT
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return { success: false, error: 'Неверный формат токена. Должен быть JWT (три части через точку).' };
+  }
+
+  // Проверяем срок действия без запроса к WB
+  const payload = decodeWbToken(token);
+  if (payload?.exp && Date.now() / 1000 > payload.exp) {
+    const expDate = new Date(payload.exp * 1000).toLocaleDateString('ru-RU');
+    return { success: false, error: `Токен истёк ${expDate}. Создайте новый в ЛК WB.` };
+  }
+
+  // Реальная проверка токена запросом к WB API
+  try {
+    const res = await axios.get('https://marketplace-api.wildberries.ru/api/v3/warehouses', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      httpsAgent: WB_AGENT,
+      timeout: 10000,
+      validateStatus: s => s < 500,
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      return { success: false, error: 'Неверный токен или недостаточно прав. Проверьте токен в ЛК WB.' };
+    }
+    if (res.status === 429) {
+      // 429 означает что токен валиден — просто rate limit
+      console.log('[wb-auth] Token validation: 429 (rate limit) — token is valid');
+      return { success: true, info: payload };
+    }
+    if (res.status === 200) {
+      console.log('[wb-auth] Token validation: OK');
+      return { success: true, info: payload };
+    }
+
+    return { success: false, error: `WB API вернул статус ${res.status}` };
+  } catch (e) {
+    console.warn('[wb-auth] Token validation request failed:', e.message);
+    // Не можем проверить токен — принимаем как валидный (не блокируем сохранение)
+    return { success: true, info: payload };
+  }
+}
+
+module.exports = { requestSmsCode, confirmSmsCode, validateWbToken, decodeWbToken };
