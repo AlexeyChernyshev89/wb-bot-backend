@@ -468,8 +468,14 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
     const res = await axios.post(
       `${WB_SELLER_SUPPLY}${TRANSFER_PATH}${endpoint}`,
       body,
-      { headers, timeout: 15000 }
+      { headers, timeout: 15000, validateStatus: () => true }
     );
+    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${JSON.stringify(res.data).substring(0,100)}`);
+    if (res.status === 401 || res.status === 403) {
+      const e = new Error(`seller-supply ${endpoint} вернул ${res.status}`);
+      e.sessionExpired = true;
+      throw e;
+    }
     return res.data;
   } catch (err) {
     const status = err.response?.status;
