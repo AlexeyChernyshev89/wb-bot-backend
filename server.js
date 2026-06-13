@@ -75,9 +75,10 @@ async function initDB() {
       updated_at     TIMESTAMP DEFAULT NOW()
     );
     -- Добавляем колонки если таблица уже существует (миграция)
-    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS retry_count   INTEGER DEFAULT 0;
-    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP;
-    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS error_message TEXT;
+    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS retry_count    INTEGER DEFAULT 0;
+    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS next_retry_at  TIMESTAMP;
+    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS error_message  TEXT;
+    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS product_name   TEXT;
 
     CREATE TABLE IF NOT EXISTS payments (
       id           SERIAL PRIMARY KEY,
@@ -470,7 +471,7 @@ app.put('/transfers/stocks/:warehouseId', telegramAuth, requireDB, async (req, r
  * Создать запрос на перемещение товара между складами.
  */
 app.post('/transfers/create', telegramAuth, requireDB, async (req, res) => {
-  const { from_warehouse, to_warehouse, sku, amount } = req.body;
+  const { from_warehouse, to_warehouse, sku, amount, product_name } = req.body;
 
   if (!from_warehouse || !to_warehouse || !sku || !amount) {
     return res.status(400).json({ error: 'Заполните все поля: from_warehouse, to_warehouse, sku, amount' });
@@ -484,9 +485,9 @@ app.post('/transfers/create', telegramAuth, requireDB, async (req, res) => {
 
   try {
     const result = await db.query(
-      `INSERT INTO transfer_requests (user_id, from_warehouse, to_warehouse, sku, amount, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING *`,
-      [req.telegramId, from_warehouse, to_warehouse, sku, parseInt(amount, 10)]
+      `INSERT INTO transfer_requests (user_id, from_warehouse, to_warehouse, sku, amount, status, product_name)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING *`,
+      [req.telegramId, from_warehouse, to_warehouse, sku, parseInt(amount, 10), product_name || null]
     );
     res.json({ success: true, request: result.rows[0] });
   } catch (err) {
@@ -1622,8 +1623,12 @@ async function executeRedistribution(wbToken, req) {
 async function notifyUser(telegramId, text, req) {
   if (!BOT_TOKEN) return;
   try {
+    let articleLine = `✅ Артикул: ${req.sku}`;
+    if (req.product_name) {
+      articleLine += ` (${req.product_name})`;
+    }
     const detail = req
-      ? `\n✅ Поставщик: Текущий аккаунт WB\n✅ Склад: ${req.from_warehouse} ➡️ ${req.to_warehouse}\n✅ Артикул: ${req.sku}\n✅ Единиц товара: ${req.amount}`
+      ? `\n✅ Поставщик: Текущий аккаунт WB\n✅ Склад: ${req.from_warehouse} ➡️ ${req.to_warehouse}\n${articleLine}\n✅ Единиц товара: ${req.amount}`
       : '';
     await axios.post(
       `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,

@@ -635,11 +635,11 @@
     <div class="step-item"><div class="step-num">2</div><span>Профиль → Настройки → <b style="color:var(--text)">Доступ к API</b></span></div>
     <div class="step-item"><div class="step-num">3</div><span>Нажмите <b style="color:var(--text)">«Создать новый токен»</b></span></div>
     <div class="step-item"><div class="step-num">4</div>
-      <span>Тип токена: <b style="color:var(--text)">«Для интеграции вручную» → Персональный</b><br>
-        Категории:<br>
-        <b style="color:var(--accent)">✓ Аналитика (Analytics)</b> — остатки FBO на складах WB<br>
-        <b style="color:var(--accent)">✓ Маркетплейс (Marketplace)</b> — склады<br>
-        <b style="color:var(--accent)">✓ Контент (Content)</b> — поиск товаров
+      <span>Выберите все четыре категории:<br>
+        <b style="color:var(--accent)">✓ Маркетплейс (Marketplace)</b> — склады и остатки FBS<br>
+        <b style="color:var(--accent)">✓ Контент (Content)</b> — поиск товаров по артикулу<br>
+        <b style="color:var(--accent)">✓ Статистика (Statistics)</b> — остатки FBO на складах WB<br>
+        <b style="color:var(--accent)">✓ Аналитика (Analytics)</b> — дополнительные данные
       </span>
     </div>
     <div class="step-item"><div class="step-num">5</div><span>Скопируйте токен и вставьте ниже</span></div>
@@ -647,7 +647,7 @@
 
   <div class="info-banner" style="margin-bottom:14px">
     <span>⚠️</span>
-    <span>Для остатков на складах WB (FBO) нужен <b>Персональный токен</b> с категорией <b>Аналитика</b>. Базовый токен не работает с этим API.</span>
+    <span>Для отображения остатков на складах WB (FBO) обязательно нужна категория <b>Статистика</b>. Без неё поиск товаров будет работать, но склады с остатками показываться не будут.</span>
   </div>
 
   <label class="field-label">Новый API-токен Wildberries</label>
@@ -662,7 +662,7 @@
     </button>
   </div>
   <div style="font-size:11px;color:var(--text2);margin-bottom:14px;padding-left:2px">
-    Токен начинается с <span style="color:var(--accent);font-family:monospace">eyJ...</span> · Персональный токен: ~700 символов
+    Токен начинается с <span style="color:var(--accent);font-family:monospace">eyJ...</span> и имеет длину около 200 символов
   </div>
 
   <div id="updateTokenMsg" class="msg"></div>
@@ -1335,7 +1335,8 @@ async function saveRequest() {
   try {
     await api('POST', '/transfers/create', {
       from_warehouse: from, to_warehouse: to,
-      sku: String(card.nmId), amount: qty
+      sku: String(card.nmId), amount: qty,
+      product_name: card.name || null
     });
     go('list');
   } catch(e) {
@@ -1574,7 +1575,7 @@ async function updateToken() {
     // Обновляем баннер на главном экране
     const banner = document.getElementById('tokenBanner');
     const bannerText = document.getElementById('tokenBannerText');
-    if (res.expires_at && banner && bannerText) {
+    if (res.expires_at) {
       banner.style.display = 'flex';
       bannerText.innerHTML = `WB подключён · токен до <b>${res.expires_at}</b>`;
     }
