@@ -194,8 +194,20 @@ async function analyticsViaProxy(token, body) {
       body,
       authType: 'bearer',   // Analytics API принимает только Authorization: Bearer
     },
-    { timeout: 30000, validateStatus: () => true }
+    {
+      timeout: 30000,
+      validateStatus: () => true,
+      // ngrok free-план показывает HTML-предупреждение без этого заголовка
+      headers: { 'ngrok-skip-browser-warning': 'true', 'User-Agent': 'wb-bot-backend' },
+    }
   );
+
+  // Если ngrok вернул HTML (502/предупреждение) — res.data будет строкой
+  if (typeof res.data === 'string' && res.data.includes('<!DOCTYPE html>')) {
+    const err = new Error('Прокси недоступен (ngrok вернул HTML вместо JSON — проверьте что proxy.js запущен на Windows)');
+    err.status = 502;
+    throw err;
+  }
 
   // /wb-call возвращает { status: N, data: <wb_response> }
   const wbStatus = res.data?.status ?? res.status;

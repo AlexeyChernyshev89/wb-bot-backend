@@ -201,7 +201,10 @@ async function confirmSmsCode(phone, smsCode, requestToken) {
         const proxyRes = await axios.post(
           `${PROXY_URL}/confirm`,
           { sticker, code: cleanCode, phone: cleanPhone },
-          { timeout: 120000 }
+          {
+            timeout: 120000,
+            headers: { 'ngrok-skip-browser-warning': 'true', 'User-Agent': 'wb-bot-backend' },
+          }
         );
         const pd = proxyRes.data;
         console.log(`[wb-auth] proxy /confirm →`, JSON.stringify(pd).substring(0, 150));

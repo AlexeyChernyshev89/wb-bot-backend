@@ -970,14 +970,42 @@ app.post('/auth/request-sms', telegramAuth, requireDB, async (req, res) => {
       try {
         console.log('[auth/request-sms] Using proxy:', PROXY_URL);
         const axios = require('axios');
-        const proxyResp = await axios.post(PROXY_URL, { phone: cleanPhone }, { timeout: 90000 });
+        const proxyResp = await axios.post(
+          PROXY_URL,
+          { phone: cleanPhone },
+          {
+            timeout: 90000,
+            validateStatus: () => true,
+            headers: { 'ngrok-skip-browser-warning': 'true', 'User-Agent': 'wb-bot-backend' },
+          }
+        );
         const pd = proxyResp.data;
+
+        // ngrok вернул HTML (502 / страница-предупреждение) — прокси не запущен
+        if (typeof pd === 'string' && pd.includes('<!DOCTYPE html>')) {
+          return res.status(503).json({
+            success: false,
+            error: 'Прокси на Windows не запущен. Запустите proxy.js (node C:\\wb-proxy\\proxy.js) и повторите.',
+          });
+        }
+        if (proxyResp.status === 502 || proxyResp.status === 503) {
+          return res.status(503).json({
+            success: false,
+            error: 'Прокси недоступен (HTTP ' + proxyResp.status + '). Проверьте что proxy.js запущен на Windows.',
+          });
+        }
+
         console.log('[auth/request-sms] Proxy result:', JSON.stringify(pd).substring(0, 200));
         const sticker = pd.data?.payload?.sticker || null;
         result = { success: pd.success === true, requestToken: sticker ? `sticker:${sticker}` : null, error: pd.success ? null : (pd.data?.error || pd.error || 'Ошибка прокси') };
       } catch(proxyErr) {
-        console.warn('[auth/request-sms] Proxy failed:', proxyErr.message, '— fallback to direct');
-        result = await requestSmsCode(cleanPhone);
+        console.warn('[auth/request-sms] Proxy error:', proxyErr.message);
+        // НЕ делаем fallback на requestSmsCode — он даёт phone: путь без захвата x-supplier-id,
+        // что приводит к "incorrect supplier id". Лучше честно сообщить об ошибке.
+        return res.status(503).json({
+          success: false,
+          error: 'Прокси на Windows недоступен. Запустите proxy.js и ngrok, затем повторите запрос SMS.',
+        });
       }
     } else {
       result = await requestSmsCode(cleanPhone);
