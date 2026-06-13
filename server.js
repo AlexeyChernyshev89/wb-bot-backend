@@ -1579,16 +1579,36 @@ async function executeRedistribution(wbToken, req) {
     throw err;
   }
 
-  // Ищем склад-источник в списке доступных
+  // Логируем структуру ответа AvailableLimits для отладки
+  console.log(`[worker] AvailableLimits keys:`, Object.keys(limitsData || {}));
+
   const normalize = s => (s || '').toLowerCase().replace(/[^а-яёa-z0-9]/gi, '');
-  const fromWarehouse = (limitsData?.warehouses || limitsData || []).find(w =>
+
+  // Определяем массив складов-источников
+  // WB возвращает: { warehouses: [...], targets: [...] } или просто массив
+  const sourceList = Array.isArray(limitsData)
+    ? limitsData
+    : (limitsData?.warehouses || limitsData?.offices || []);
+
+  const fromWarehouse = sourceList.find(w =>
     normalize(w.officeName || w.name || '').includes(normalize(req.from_warehouse)) ||
     normalize(req.from_warehouse).includes(normalize(w.officeName || w.name || ''))
   );
 
+  console.log(`[worker] fromWarehouse search: "${req.from_warehouse}" in ${sourceList.length} items → ${fromWarehouse ? JSON.stringify(fromWarehouse).substring(0,100) : 'NOT FOUND'}`);
+
   if (!fromWarehouse) {
     const e = new Error(`Склад «${req.from_warehouse}» недоступен для перемещения данного артикула`);
     e.status = 409; // будет повтор
+    throw e;
+  }
+
+  // fromOfficeId должен быть числом
+  const fromOfficeId = fromWarehouse.officeId || fromWarehouse.id || fromWarehouse.warehouseId;
+  if (!fromOfficeId || typeof fromOfficeId !== 'number') {
+    console.error(`[worker] fromOfficeId не найден в объекте склада:`, JSON.stringify(fromWarehouse));
+    const e = new Error(`Не удалось получить ID склада «${req.from_warehouse}»`);
+    e.status = 409;
     throw e;
   }
 
@@ -1600,18 +1620,34 @@ async function executeRedistribution(wbToken, req) {
     throw e;
   }
 
-  // Ищем склад-назначение
-  const toWarehouse = (limitsData?.allWarehouses || limitsData?.targets || []).find(w =>
+  // Определяем массив складов-назначений
+  const targetList = Array.isArray(limitsData?.targets)
+    ? limitsData.targets
+    : (limitsData?.allWarehouses || limitsData?.toWarehouses || []);
+
+  const toWarehouse = targetList.find(w =>
     normalize(w.officeName || w.name || '').includes(normalize(req.to_warehouse)) ||
     normalize(req.to_warehouse).includes(normalize(w.officeName || w.name || ''))
   );
 
-  const toOfficeId = toWarehouse?.officeId || toWarehouse?.id || req.to_warehouse;
+  console.log(`[worker] toWarehouse search: "${req.to_warehouse}" in ${targetList.length} items → ${toWarehouse ? JSON.stringify(toWarehouse).substring(0,100) : 'NOT FOUND'}`);
 
-  // Шаг 2: Создаём перемещение
+  // toOfficeId ОБЯЗАН быть числом — иначе WB создаст невалидное перемещение
+  const toOfficeId = toWarehouse?.officeId || toWarehouse?.id || toWarehouse?.warehouseId;
+  if (!toOfficeId || typeof toOfficeId !== 'number') {
+    const knownTargets = targetList.map(w => w.officeName || w.name).filter(Boolean).join(', ');
+    const e = new Error(
+      `Склад назначения «${req.to_warehouse}» не найден в списке доступных (${targetList.length} складов: ${knownTargets.substring(0,100)})`
+    );
+    e.status = 409; // повтор — может склад появится позже
+    throw e;
+  }
+
+  // Шаг 2: Создаём перемещение — только с числовыми ID
+  console.log(`[worker] createWbTransfer: nmId=${req.sku} from=${fromOfficeId} to=${toOfficeId} amount=${req.amount}`);
   await createWbTransfer(sessionToken, {
     nmId:         Number(req.sku),
-    fromOfficeId: fromWarehouse.officeId || fromWarehouse.id,
+    fromOfficeId: fromOfficeId,
     toOfficeId:   toOfficeId,
     amount:       Number(req.amount),
   });
