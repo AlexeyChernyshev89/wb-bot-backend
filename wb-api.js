@@ -220,8 +220,16 @@ async function analyticsViaProxy(token, body) {
     throw err;
   }
 
-  // Новый Analytics API: { data: [ {nmId, warehouseName, quantity, ...} ] }
-  return wbBody?.data || wbBody?.stocks || (Array.isArray(wbBody) ? wbBody : []);
+  // Новый Analytics API: { data: { items: [ {nmId, warehouseName, quantity, ...} ] } }
+  // Возможные структуры: data.items, data.data, data.stocks, или массив напрямую
+  const items =
+    wbBody?.data?.items ||
+    wbBody?.items ||
+    wbBody?.data?.data ||
+    wbBody?.data ||
+    wbBody?.stocks ||
+    (Array.isArray(wbBody) ? wbBody : []);
+  return Array.isArray(items) ? items : [];
 }
 
 /**
@@ -230,7 +238,14 @@ async function analyticsViaProxy(token, body) {
 async function analyticsDirectly(token, body) {
   const response = await apiRequest('POST', WB_ANALYTICS_API,
     '/api/analytics/v1/stocks-report/wb-warehouses', token, body);
-  return response?.data || response?.stocks || [];
+  const items =
+    response?.data?.items ||
+    response?.items ||
+    response?.data?.data ||
+    response?.data ||
+    response?.stocks ||
+    (Array.isArray(response) ? response : []);
+  return Array.isArray(items) ? items : [];
 }
 
 /**
