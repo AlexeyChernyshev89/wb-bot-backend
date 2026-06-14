@@ -500,6 +500,43 @@ const TRANSFER_PATH    = '/ns/goods-return/supply-manager/api/v1/transfer';
 /**
  * Базовый POST к внутреннему API seller-supply.wildberries.ru
  */
+// Supplier ID продавца. У КАЖДОГО пользователя свой — извлекаем из его
+// собственных кук (wb-seller-lk JWT, поле Z-Sid) или из самого Authorizev3.
+// НЕ используем глобальный ENV — это сломало бы мультипользовательность.
+function getSupplierId(sessionCookies, sessionToken) {
+  // 1. Если x-supplier-id уже есть в куках пользователя — берём оттуда
+  if (sessionCookies) {
+    const m = sessionCookies.match(/x-supplier-id=([0-9a-f-]{36})/i);
+    if (m) return m[1];
+
+    // 2. Извлекаем из wb-seller-lk JWT (поле Z-Sid) — он у каждого свой
+    const lkMatch = sessionCookies.match(/wb-seller-lk=([^;]+)/);
+    if (lkMatch) {
+      try {
+        const parts = lkMatch[1].split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+          if (payload?.data?.['Z-Sid']) return payload.data['Z-Sid'];
+        }
+      } catch {}
+    }
+  }
+
+  // 3. Пытаемся достать из Authorizev3 JWT (некоторые версии содержат supplier_id)
+  if (sessionToken) {
+    try {
+      const parts = sessionToken.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        const sid = payload?.supplier_id || payload?.sid || payload?.['Z-Sid'];
+        if (sid) return sid;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
 async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookies = null) {
   // Проверяем что токен — настоящий RS256 JWT, а не кука
   if (!sessionToken || !sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs')) {
@@ -507,6 +544,19 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
     e.status = 401;
     e.sessionExpired = true;
     throw e;
+  }
+
+  // Гарантируем наличие x-supplier-id в куках — без него seller-supply даёт 401.
+  // Берём ID из кук/токена ИМЕННО ЭТОГО пользователя (мультипользовательность).
+  let cookies = sessionCookies || '';
+  if (!cookies.includes('x-supplier-id=')) {
+    const supplierId = getSupplierId(cookies, sessionToken);
+    if (supplierId) {
+      cookies += `${cookies ? '; ' : ''}x-supplier-id=${supplierId}; x-supplier-id-external=${supplierId}`;
+      console.log(`[seller-supply] ✅ x-supplier-id извлечён из данных пользователя: ${supplierId.substring(0, 12)}...`);
+    } else {
+      console.warn('[seller-supply] ⚠️  x-supplier-id не найден в куках/токене пользователя — нужна повторная SMS авторизация (прокси должен захватить wb-seller-lk)');
+    }
   }
 
   try {
@@ -519,14 +569,11 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
       'User-Agent':     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       'Accept-Language':'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
     };
-    if (sessionCookies) {
-      headers['Cookie'] = sessionCookies;
-      const hasSupplier = sessionCookies.includes('x-supplier-id');
-      const hasZzatw    = sessionCookies.includes('__zzatw-wb');
-      console.log(`[seller-supply] using cookies (len=${sessionCookies.length}, x-supplier-id=${hasSupplier}, __zzatw-wb=${hasZzatw}):`, sessionCookies.substring(0, 80));
-      if (!hasSupplier) {
-        console.warn('[seller-supply] ⚠️  x-supplier-id отсутствует в куках — seller-supply вернёт 401. Нужна повторная SMS авторизация.');
-      }
+    if (cookies) {
+      headers['Cookie'] = cookies;
+      const hasSupplier = cookies.includes('x-supplier-id');
+      const hasZzatw    = cookies.includes('__zzatw-wb');
+      console.log(`[seller-supply] using cookies (len=${cookies.length}, x-supplier-id=${hasSupplier}, __zzatw-wb=${hasZzatw}):`, cookies.substring(0, 80));
     }
     const res = await axios.post(
       `${WB_SELLER_SUPPLY}${TRANSFER_PATH}${endpoint}`,
