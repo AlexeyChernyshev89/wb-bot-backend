@@ -79,6 +79,7 @@ async function initDB() {
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS next_retry_at  TIMESTAMP;
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS error_message  TEXT;
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS product_name   TEXT;
+    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS moved          INTEGER DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS payments (
       id           SERIAL PRIMARY KEY,
@@ -1470,7 +1471,7 @@ async function transferWorker() {
     // Берём pending-заявки с токенами пользователей
     const { rows } = await db.query(`
       SELECT tr.id, tr.user_id, tr.from_warehouse, tr.to_warehouse,
-             tr.sku, tr.amount, tr.retry_count,
+             tr.sku, tr.amount, tr.retry_count, tr.moved, tr.product_name,
              u.wb_token
       FROM   transfer_requests tr
       JOIN   users u ON u.telegram_id = tr.user_id
@@ -1515,15 +1516,34 @@ async function processRequest(req) {
   console.log(`[worker] → #${req.id} | ${req.from_warehouse} → ${req.to_warehouse} | SKU ${req.sku} × ${req.amount} | попытка ${req.retry_count + 1}`);
 
   try {
-    await executeRedistribution(req.wb_token, req);
+    const result = await executeRedistribution(req.wb_token, req);
 
-    // ✅ Успех
-    await db.query(
-      `UPDATE transfer_requests SET status='done', error_message=NULL, updated_at=NOW() WHERE id=\$1`,
-      [req.id]
-    );
-    await notifyUser(req.user_id, '✅ Заявка выполнена', req);
-    console.log(`[worker] ✅ #${req.id} выполнена`);
+    const total    = Number(req.amount);
+    const wasMoved = result && result.wasMoved ? result.wasMoved : total;
+
+    if (wasMoved >= total) {
+      // ✅ Полностью перемещено
+      await db.query(
+        `UPDATE transfer_requests SET status='done', moved=\$2, error_message=NULL, updated_at=NOW() WHERE id=\$1`,
+        [req.id, total]
+      );
+      await notifyUser(req.user_id, '✅ Заявка выполнена', req);
+      console.log(`[worker] ✅ #${req.id} выполнена полностью (${total} ед)`);
+    } else {
+      // ⏳ Частично перемещено — сохраняем прогресс, продолжаем ловить квоту
+      const justMoved = result.moved || 0;
+      const nextRetry = new Date(Date.now() + RETRY_409_DELAY);
+      await db.query(
+        `UPDATE transfer_requests SET moved=\$2, next_retry_at=\$3, error_message=\$4, updated_at=NOW() WHERE id=\$1`,
+        [req.id, wasMoved, nextRetry, `Перемещено ${wasMoved} из ${total}, ждём квоту на остаток`]
+      );
+      await notifyUser(
+        req.user_id,
+        `⏳ Перемещено ${justMoved} ед (всего ${wasMoved} из ${total}). Ждём квоту на оставшиеся ${total - wasMoved}.`,
+        req
+      );
+      console.log(`[worker] ⏳ #${req.id} частично: ${wasMoved}/${total}, продолжаем`);
+    }
 
   } catch (err) {
     const status   = err.status || 0;
@@ -1686,19 +1706,39 @@ async function executeRedistribution(wbToken, req) {
   const dstOfficeId = dstQuota.officeID;
   console.log(`[worker] назначение: ${dstQuota.officeName} (officeID=${dstOfficeId}, dstQuota=${dstQuota.dstQuota})`);
 
-  // Проверяем квоту ИСТОЧНИКА — можно ли вообще забрать товар с этого склада.
-  // srcQuota=0 означает что WB не разрешает отгрузку с него (даже если остаток есть).
+  // Проверяем квоту ИСТОЧНИКА — открыта ли отгрузка с этого склада сейчас.
+  // srcQuota=0 — квота временно закрыта. WB открывает квоты порциями в течение дня,
+  // поэтому это ПОВТОР (409), а не отказ — воркер ждёт появления квоты. В этом суть бота.
   const srcQuota = quotas.find(q => q.officeID === srcOfficeId);
-  if (srcQuota && srcQuota.srcQuota <= 0) {
-    const e = new Error(`Со склада «${req.from_warehouse}» нельзя забрать товар (квота отгрузки = 0). Выберите другой склад-источник.`);
-    e.status = 400; // НЕ повтор — это постоянное ограничение, заявка невыполнима как есть
+  const srcQuotaValue = srcQuota ? srcQuota.srcQuota : 0;
+  console.log(`[worker] квота источника «${req.from_warehouse}»: srcQuota=${srcQuotaValue}`);
+
+  if (srcQuotaValue <= 0) {
+    const e = new Error(`Квота отгрузки со склада «${req.from_warehouse}» пока закрыта (srcQuota=0). Ждём открытия.`);
+    e.status = 409; // ПОВТОР — ждём пока WB откроет квоту
     throw e;
   }
 
-  // Проверяем что склад назначения принимает товар (dstQuota > 0)
-  if (dstQuota.dstQuota <= 0) {
-    const e = new Error(`Склад «${req.to_warehouse}» сейчас не принимает товар (квота 0). Повтор позже.`);
-    e.status = 409; // повтор когда квота откроется
+  // Сколько ещё осталось переместить (с учётом уже перемещённого ранее частями)
+  const alreadyMoved = req.moved || 0;
+  const remaining    = Number(req.amount) - alreadyMoved;
+  if (remaining <= 0) {
+    return; // всё уже перемещено — заявка будет помечена done выше по потоку
+  }
+
+  // Сколько реально можем переместить за эту попытку — минимум из:
+  // остатка к перемещению, остатка на складе, открытой квоты отгрузки, квоты приёма
+  const moveNow = Math.min(
+    remaining,
+    srcWh.count,
+    srcQuotaValue,
+    dstQuota.dstQuota
+  );
+  console.log(`[worker] можем переместить сейчас: ${moveNow} (осталось=${remaining}, остаток склада=${srcWh.count}, srcQuota=${srcQuotaValue}, dstQuota=${dstQuota.dstQuota})`);
+
+  if (moveNow <= 0) {
+    const e = new Error(`Нет доступной квоты для перемещения прямо сейчас. Ждём.`);
+    e.status = 409;
     throw e;
   }
 
@@ -1709,16 +1749,19 @@ async function executeRedistribution(wbToken, req) {
     throw e;
   }
 
-  // Шаг 3: Создаём перемещение с реальными числовыми ID
-  console.log(`[worker] createWbTransfer: nmID=${req.sku} chrtID=${chrtId} src=${srcOfficeId} dst=${dstOfficeId} count=${req.amount}`);
+  // Шаг 3: Создаём перемещение на moveNow единиц
+  console.log(`[worker] createWbTransfer: nmID=${req.sku} chrtID=${chrtId} src=${srcOfficeId} dst=${dstOfficeId} count=${moveNow}`);
   const createResult = await createWbTransfer(sessionToken, {
     nmId:         Number(req.sku),
     chrtId:       chrtId,
     fromOfficeId: srcOfficeId,
     toOfficeId:   dstOfficeId,
-    amount:       Number(req.amount),
+    amount:       moveNow,
   }, sessionCookies);
-  console.log(`[worker] ✅ перемещение создано:`, JSON.stringify(createResult).substring(0, 150));
+  console.log(`[worker] ✅ перемещено ${moveNow} ед:`, JSON.stringify(createResult).substring(0, 150));
+
+  // Возвращаем сколько переместили — обработчик решит done или продолжать частями
+  return { moved: moveNow, total: Number(req.amount), wasMoved: alreadyMoved + moveNow };
 }
 
 /**
