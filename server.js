@@ -1165,18 +1165,40 @@ app.get('/auth/session-status', telegramAuth, requireDB, async (req, res) => {
 
 /**
  * GET /transfers/wb-warehouses
- * Список складов WB (FBO) — для поля «Куда отправить».
- * Берётся из Statistics API: уникальные warehouseName из остатков продавца.
+ * Список складов WB куда можно ОТПРАВИТЬ товар (для поля «Куда отправить»).
+ * Источник — AvailableLimits (quotas с dstQuota > 0), как в реальном ЛК WB.
  */
 app.get('/transfers/wb-warehouses', telegramAuth, requireDB, async (req, res) => {
   try {
     const token = await getUserToken(req.telegramId);
     if (!token) return res.status(401).json({ error: 'Сначала подключите WB API-токен' });
-    const names = await getWbFboWarehouseNames(token);
+
+    // Берём склады из квот — только те что реально принимают товар
+    const { token: sessionToken, cookies: sessionCookies } = await getUserSessionToken(req.telegramId);
+    if (sessionToken && sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs')) {
+      try {
+        const quotas = await getTransferAvailableLimits(sessionToken, null, sessionCookies);
+        // Только склады принимающие товар (dstQuota > 0), исключаем служебные
+        const names = quotas
+          .filter(q => (q.dstQuota || 0) > 0)
+          .map(q => q.displayName || q.officeName)
+          .filter(Boolean)
+          .filter(n => !/остальные|питание/i.test(n))
+          .sort((a, b) => a.localeCompare(b, 'ru'));
+        const unique = [...new Set(names)];
+        console.log(`[wb-warehouses] ${unique.length} складов с dstQuota>0`);
+        return res.json({ warehouses: unique });
+      } catch (e) {
+        console.warn('[wb-warehouses] AvailableLimits failed:', e.message);
+      }
+    }
+
+    // Fallback: старый способ (Analytics остатки), но фильтруем служебные записи
+    const names = (await getWbFboWarehouseNames(token))
+      .filter(n => !/остальные|питание/i.test(n));
     res.json({ warehouses: names });
   } catch(err) {
     console.error('wb-warehouses error:', err.message);
-    // Возвращаем пустой список — фронтенд использует QUOTA_DATA как fallback
     res.json({ warehouses: [], error: err.message });
   }
 });
@@ -1663,6 +1685,15 @@ async function executeRedistribution(wbToken, req) {
 
   const dstOfficeId = dstQuota.officeID;
   console.log(`[worker] назначение: ${dstQuota.officeName} (officeID=${dstOfficeId}, dstQuota=${dstQuota.dstQuota})`);
+
+  // Проверяем квоту ИСТОЧНИКА — можно ли вообще забрать товар с этого склада.
+  // srcQuota=0 означает что WB не разрешает отгрузку с него (даже если остаток есть).
+  const srcQuota = quotas.find(q => q.officeID === srcOfficeId);
+  if (srcQuota && srcQuota.srcQuota <= 0) {
+    const e = new Error(`Со склада «${req.from_warehouse}» нельзя забрать товар (квота отгрузки = 0). Выберите другой склад-источник.`);
+    e.status = 400; // НЕ повтор — это постоянное ограничение, заявка невыполнима как есть
+    throw e;
+  }
 
   // Проверяем что склад назначения принимает товар (dstQuota > 0)
   if (dstQuota.dstQuota <= 0) {
