@@ -10,7 +10,7 @@ const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, createWbTransfer, getWbTransferList } = require('./wb-api');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList } = require('./wb-api');
 const axios = require('axios');
 const path = require('path');
 const fs   = require('fs');
@@ -1586,99 +1586,108 @@ async function executeRedistribution(wbToken, req) {
     throw e;
   }
 
-  // Шаг 1: Получаем доступные лимиты для данного артикула
-  let limitsData;
-  try {
-    limitsData = await getTransferAvailableLimits(sessionToken, req.sku, sessionCookies);
-    console.log(`[worker] AvailableLimits raw:`, JSON.stringify(limitsData).substring(0, 200));
+  const normalize = s => (s || '').toLowerCase().replace(/[^а-яёa-z0-9]/gi, '');
 
-    // Пустой ответ = сессия истекла, нужна повторная SMS авторизация
-    if (!limitsData || limitsData === '' || (typeof limitsData === 'object' && Object.keys(limitsData).length === 0)) {
-      const e = new Error('Сессия истекла. Авторизуйтесь снова через SMS в Mini App.');
-      e.status = 401;
-      throw e;
-    }
+  // Шаг 1: Получаем остатки артикула по складам (откуда можно забрать).
+  // transfer/list возвращает chrts[] с warehouseID, warehouseName, count, dstWarehouseIDs[]
+  let chrts;
+  try {
+    chrts = await getTransferStockByWarehouse(sessionToken, req.sku, sessionCookies);
+    console.log(`[worker] transfer/list: ${chrts.length} складов с остатком для nmId=${req.sku}`);
   } catch (err) {
     if (err.sessionExpired) {
-      const e = new Error('Сессионный токен истёк. Обновите Authorizev3 в разделе «Обновить токен WB»');
+      const e = new Error('Сессионный токен истёк. Авторизуйтесь снова через SMS в Mini App.');
       e.status = 400;
       throw e;
     }
     throw err;
   }
 
-  // Логируем структуру ответа AvailableLimits для отладки
-  console.log(`[worker] AvailableLimits keys:`, Object.keys(limitsData || {}));
-
-  const normalize = s => (s || '').toLowerCase().replace(/[^а-яёa-z0-9]/gi, '');
-
-  // Определяем массив складов-источников
-  // WB возвращает: { warehouses: [...], targets: [...] } или просто массив
-  const sourceList = Array.isArray(limitsData)
-    ? limitsData
-    : (limitsData?.warehouses || limitsData?.offices || []);
-
-  const fromWarehouse = sourceList.find(w =>
-    normalize(w.officeName || w.name || '').includes(normalize(req.from_warehouse)) ||
-    normalize(req.from_warehouse).includes(normalize(w.officeName || w.name || ''))
-  );
-
-  console.log(`[worker] fromWarehouse search: "${req.from_warehouse}" in ${sourceList.length} items → ${fromWarehouse ? JSON.stringify(fromWarehouse).substring(0,100) : 'NOT FOUND'}`);
-
-  if (!fromWarehouse) {
-    const e = new Error(`Склад «${req.from_warehouse}» недоступен для перемещения данного артикула`);
-    e.status = 409; // будет повтор
-    throw e;
-  }
-
-  // fromOfficeId должен быть числом
-  const fromOfficeId = fromWarehouse.officeId || fromWarehouse.id || fromWarehouse.warehouseId;
-  if (!fromOfficeId || typeof fromOfficeId !== 'number') {
-    console.error(`[worker] fromOfficeId не найден в объекте склада:`, JSON.stringify(fromWarehouse));
-    const e = new Error(`Не удалось получить ID склада «${req.from_warehouse}»`);
+  if (!chrts || chrts.length === 0) {
+    const e = new Error(`Нет остатков артикула ${req.sku} ни на одном складе для перемещения`);
     e.status = 409;
     throw e;
   }
 
-  // Проверяем доступность квоты
-  const isAvailable = fromWarehouse.available !== false && fromWarehouse.limitAvailable !== false;
-  if (!isAvailable) {
-    const e = new Error(`Суточный лимит склада «${req.from_warehouse}» исчерпан`);
-    e.status = 409; // будет повтор когда квота откроется
-    throw e;
-  }
-
-  // Определяем массив складов-назначений
-  const targetList = Array.isArray(limitsData?.targets)
-    ? limitsData.targets
-    : (limitsData?.allWarehouses || limitsData?.toWarehouses || []);
-
-  const toWarehouse = targetList.find(w =>
-    normalize(w.officeName || w.name || '').includes(normalize(req.to_warehouse)) ||
-    normalize(req.to_warehouse).includes(normalize(w.officeName || w.name || ''))
+  // Ищем склад-ИСТОЧНИК по названию среди складов где есть остаток
+  const srcWh = chrts.find(c =>
+    normalize(c.warehouseName).includes(normalize(req.from_warehouse)) ||
+    normalize(req.from_warehouse).includes(normalize(c.warehouseName))
   );
 
-  console.log(`[worker] toWarehouse search: "${req.to_warehouse}" in ${targetList.length} items → ${toWarehouse ? JSON.stringify(toWarehouse).substring(0,100) : 'NOT FOUND'}`);
-
-  // toOfficeId ОБЯЗАН быть числом — иначе WB создаст невалидное перемещение
-  const toOfficeId = toWarehouse?.officeId || toWarehouse?.id || toWarehouse?.warehouseId;
-  if (!toOfficeId || typeof toOfficeId !== 'number') {
-    const knownTargets = targetList.map(w => w.officeName || w.name).filter(Boolean).join(', ');
-    const e = new Error(
-      `Склад назначения «${req.to_warehouse}» не найден в списке доступных (${targetList.length} складов: ${knownTargets.substring(0,100)})`
-    );
-    e.status = 409; // повтор — может склад появится позже
+  if (!srcWh) {
+    const available = chrts.map(c => `${c.warehouseName}(${c.count})`).join(', ');
+    const e = new Error(`На складе «${req.from_warehouse}» нет остатков артикула. Доступны: ${available}`);
+    e.status = 409;
     throw e;
   }
 
-  // Шаг 2: Создаём перемещение — только с числовыми ID
-  console.log(`[worker] createWbTransfer: nmId=${req.sku} from=${fromOfficeId} to=${toOfficeId} amount=${req.amount}`);
-  await createWbTransfer(sessionToken, {
+  const srcOfficeId = srcWh.warehouseID;
+  const chrtId      = srcWh.chrtID;
+  console.log(`[worker] источник: ${srcWh.warehouseName} (officeID=${srcOfficeId}, остаток=${srcWh.count}, chrtID=${chrtId})`);
+
+  // Проверяем что на складе хватает остатка
+  if (srcWh.count < Number(req.amount)) {
+    const e = new Error(`На складе «${req.from_warehouse}» только ${srcWh.count} шт, запрошено ${req.amount}`);
+    e.status = 409;
+    throw e;
+  }
+
+  // Шаг 2: Получаем квоты складов (куда можно принять товар).
+  // AvailableLimits возвращает quotas[] с officeID, officeName, srcQuota, dstQuota
+  let quotas;
+  try {
+    quotas = await getTransferAvailableLimits(sessionToken, req.sku, sessionCookies);
+    console.log(`[worker] AvailableLimits: ${quotas.length} складов с квотами`);
+  } catch (err) {
+    if (err.sessionExpired) {
+      const e = new Error('Сессионный токен истёк. Авторизуйтесь снова через SMS в Mini App.');
+      e.status = 400;
+      throw e;
+    }
+    throw err;
+  }
+
+  // Ищем склад-НАЗНАЧЕНИЕ по названию среди квот с dstQuota > 0
+  const dstQuota = quotas.find(q =>
+    normalize(q.officeName).includes(normalize(req.to_warehouse)) ||
+    normalize(q.displayName || '').includes(normalize(req.to_warehouse)) ||
+    normalize(req.to_warehouse).includes(normalize(q.officeName))
+  );
+
+  if (!dstQuota) {
+    const e = new Error(`Склад назначения «${req.to_warehouse}» не найден в списке квот`);
+    e.status = 409;
+    throw e;
+  }
+
+  const dstOfficeId = dstQuota.officeID;
+  console.log(`[worker] назначение: ${dstQuota.officeName} (officeID=${dstOfficeId}, dstQuota=${dstQuota.dstQuota})`);
+
+  // Проверяем что склад назначения принимает товар (dstQuota > 0)
+  if (dstQuota.dstQuota <= 0) {
+    const e = new Error(`Склад «${req.to_warehouse}» сейчас не принимает товар (квота 0). Повтор позже.`);
+    e.status = 409; // повтор когда квота откроется
+    throw e;
+  }
+
+  // Проверяем что назначение есть в списке разрешённых направлений источника
+  if (Array.isArray(srcWh.dstWarehouseIDs) && !srcWh.dstWarehouseIDs.includes(dstOfficeId)) {
+    const e = new Error(`Перемещение «${req.from_warehouse}» → «${req.to_warehouse}» недоступно для этого артикула`);
+    e.status = 409;
+    throw e;
+  }
+
+  // Шаг 3: Создаём перемещение с реальными числовыми ID
+  console.log(`[worker] createWbTransfer: nmID=${req.sku} chrtID=${chrtId} src=${srcOfficeId} dst=${dstOfficeId} count=${req.amount}`);
+  const createResult = await createWbTransfer(sessionToken, {
     nmId:         Number(req.sku),
-    fromOfficeId: fromOfficeId,
-    toOfficeId:   toOfficeId,
+    chrtId:       chrtId,
+    fromOfficeId: srcOfficeId,
+    toOfficeId:   dstOfficeId,
     amount:       Number(req.amount),
-  });
+  }, sessionCookies);
+  console.log(`[worker] ✅ перемещение создано:`, JSON.stringify(createResult).substring(0, 150));
 }
 
 /**

@@ -575,16 +575,24 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
       const hasZzatw    = cookies.includes('__zzatw-wb');
       console.log(`[seller-supply] using cookies (len=${cookies.length}, x-supplier-id=${hasSupplier}, __zzatw-wb=${hasZzatw}):`, cookies.substring(0, 80));
     }
+
+    // WB seller-supply использует JSON-RPC 2.0, а не обычный REST.
+    // Оборачиваем тело в RPC-конверт: { jsonrpc, id, params }
+    const rpcId = `json-rpc_${Math.floor(Math.random() * 100000)}`;
+    const rpcBody = { jsonrpc: '2.0', id: rpcId };
+    if (body && Object.keys(body).length > 0) {
+      rpcBody.params = body;
+    }
+
     const res = await axios.post(
       `${WB_SELLER_SUPPLY}${TRANSFER_PATH}${endpoint}`,
-      body,
+      rpcBody,
       { headers, timeout: 15000, validateStatus: () => true }
     );
     const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${bodyStr.substring(0, 120)}`);
+    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${bodyStr.substring(0, 150)}`);
 
     if (res.status === 401 || res.status === 403) {
-      // WB возвращает "incorrect supplier id" когда Authorizev3 — кука, а не JWT
       const wbMsg = typeof res.data === 'string' ? res.data : (res.data?.message || res.data?.error || '');
       const e = new Error(
         wbMsg.includes('incorrect supplier id')
@@ -595,7 +603,18 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
       e.sessionExpired = true;
       throw e;
     }
-    return res.data;
+
+    // JSON-RPC ошибка приходит в поле error
+    if (res.data && typeof res.data === 'object' && res.data.error) {
+      const rpcErr = res.data.error;
+      const e = new Error(rpcErr.message || rpcErr.data || `JSON-RPC error ${rpcErr.code}`);
+      e.status = res.status;
+      e.wbDetail = rpcErr;
+      throw e;
+    }
+
+    // Возвращаем result из JSON-RPC ответа (или весь body если структура иная)
+    return res.data?.result ?? res.data;
   } catch (err) {
     if (err.sessionExpired) throw err;
     const status = err.response?.status;
@@ -610,37 +629,57 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
 }
 
 /**
- * Получить список складов с доступными лимитами для артикула.
- * POST /transfer/AvailableLimits
+ * Получить доступные квоты по всем складам.
+ * POST /transfer/AvailableLimits  (без параметров)
+ * Ответ: result.data.quotas[] — { officeID, officeName, srcQuota, dstQuota }
+ *   srcQuota > 0 — можно ЗАБРАТЬ товар с этого склада
+ *   dstQuota > 0 — можно ПРИНЯТЬ товар на этот склад
  */
 async function getTransferAvailableLimits(sessionToken, nmId, sessionCookies = null) {
-  return sellerSupplyPost(sessionToken, '/AvailableLimits', { nmId: Number(nmId) }, sessionCookies);
+  const result = await sellerSupplyPost(sessionToken, '/AvailableLimits', {}, sessionCookies);
+  // Нормализуем к массиву квот
+  return result?.data?.quotas || result?.quotas || [];
+}
+
+/**
+ * Получить остатки артикула по складам (откуда можно перемещать).
+ * POST /transfer/list  с { nmIDs: [nmId] }
+ * Ответ: result.transfers[].chrts[] — { warehouseID, warehouseName, count, dstWarehouseIDs[] }
+ */
+async function getTransferStockByWarehouse(sessionToken, nmId, sessionCookies = null) {
+  const result = await sellerSupplyPost(sessionToken, '/list', { nmIDs: [Number(nmId)] }, sessionCookies);
+  const transfers = result?.transfers || [];
+  const item = transfers.find(t => t.nmID === Number(nmId)) || transfers[0];
+  return item?.chrts || [];
 }
 
 /**
  * Создать FBO-перемещение.
- * POST /transfer
+ * Формат тела определяется реальным запросом ЛК (JSON-RPC params).
+ * params: { nmID, chrtID, srcOfficeID, dstOfficeID, count }
  */
-async function createWbTransfer(sessionToken, { nmId, fromOfficeId, toOfficeId, amount }) {
-  return sellerSupplyPost(sessionToken, '', {
-    nmId:         Number(nmId),
-    fromOfficeId: Number(fromOfficeId),
-    toOfficeId:   Number(toOfficeId),
-    amount:       Number(amount),
-  });
+async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOfficeId, amount }, sessionCookies = null) {
+  return sellerSupplyPost(sessionToken, '/create', {
+    nmID:        Number(nmId),
+    chrtID:      chrtId ? Number(chrtId) : undefined,
+    srcOfficeID: Number(fromOfficeId),
+    dstOfficeID: Number(toOfficeId),
+    count:       Number(amount),
+  }, sessionCookies);
 }
 
 /**
- * Список текущих активных перемещений.
- * POST /transfer/list
+ * Список текущих активных перемещений артикула.
+ * POST /transfer/list  с { nmIDs: [nmId] }
  */
-async function getWbTransferList(sessionToken) {
-  return sellerSupplyPost(sessionToken, '/list', {});
+async function getWbTransferList(sessionToken, nmId = null, sessionCookies = null) {
+  const params = nmId ? { nmIDs: [Number(nmId)] } : {};
+  return sellerSupplyPost(sessionToken, '/list', params, sessionCookies);
 }
 
 module.exports = {
   getWarehouses, getStocks, updateStocks, deleteStocks,
   getCardsList, getAllCards, extractSkusFromCards,
   getArticleByNmId, getArticleStocks, getFboStocksRaw, getWbFboWarehouseNames,
-  getTransferAvailableLimits, createWbTransfer, getWbTransferList,
+  getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList,
 };
