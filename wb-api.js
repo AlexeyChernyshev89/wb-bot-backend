@@ -417,12 +417,12 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
   // === Попытка 1: Transfer API (seller-supply) ===
   if (sessionToken) {
     try {
-      const resp = await sellerSupplyPost(sessionToken, '/list', {}, sessionCookies);
-      const transfers = resp?.result?.transfers || [];
-      const item = transfers.find(t => t.nmID === target);
-      if (item && item.chrts) {
+      // sellerSupplyPost уже возвращает result; transfer/list требует nmIDs
+      const resp = await getTransferStockByWarehouse(sessionToken, target, sessionCookies);
+      const chrts = Array.isArray(resp) ? resp : [];
+      if (chrts.length > 0) {
         const byWarehouse = {};
-        for (const c of item.chrts) {
+        for (const c of chrts) {
           const name = c.warehouseName || `Склад ${c.warehouseID}`;
           byWarehouse[name] = (byWarehouse[name] || 0) + (c.count || 0);
         }
@@ -433,7 +433,7 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
         console.log(`[stocks] Transfer API: nmId=${nmId} в ${warehouses.length} складах`);
         return { article: article || { nmId: target, name: `Артикул ${nmId}`, skus: [] }, warehouses, source: 'transfer_api' };
       }
-      console.log(`[stocks] Transfer API: nmId=${nmId} не найден в transfer/list`);
+      console.log(`[stocks] Transfer API: nmId=${nmId} нет остатков в transfer/list`);
     } catch (e) {
       console.warn('[stocks] Transfer API failed:', e.message);
     }

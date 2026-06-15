@@ -1515,21 +1515,21 @@ async function processRequest(req) {
       // Не увеличиваем retry_count при rate limit
 
     } else if (status === 409) {
-      // Квота склада исчерпана — повторяем через 30 сек
+      // Временное препятствие (нет квоты / мало остатка / склад не принимает) — повтор
       const nextRetry = new Date(Date.now() + RETRY_409_DELAY);
       const newCount  = req.retry_count + 1;
       if (newCount >= MAX_RETRY_COUNT) {
         await db.query(
           `UPDATE transfer_requests SET status='failed', error_message=\$1, updated_at=NOW() WHERE id=\$2`,
-          ['Квота исчерпана 24+ часа подряд', req.id]
+          [wbDetail || 'Перемещение недоступно 24+ часа подряд', req.id]
         );
-        await notifyUser(req.user_id, '❌ Заявка отменена: квота не открывалась 24 часа', req);
+        await notifyUser(req.user_id, `❌ Заявка отменена: ${wbDetail || 'условия не выполнились за 24 часа'}`, req);
       } else {
         await db.query(
           `UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4`,
-          [nextRetry, newCount, `409: квота исчерпана (попытка ${newCount})`, req.id]
+          [nextRetry, newCount, `409: ${wbDetail} (попытка ${newCount})`, req.id]
         );
-        console.log(`[worker] ⚠️  #${req.id} квота исчерпана, повтор в ${nextRetry.toISOString()}`);
+        console.log(`[worker] ⚠️  #${req.id} повтор: ${wbDetail} → ${nextRetry.toISOString()}`);
       }
 
     } else if (status === 400) {
