@@ -677,9 +677,56 @@ async function getWbTransferList(sessionToken, nmId = null, sessionCookies = nul
   return sellerSupplyPost(sessionToken, '/list', params, sessionCookies);
 }
 
+/**
+ * Проверяет подключена ли у продавца платная опция
+ * «Перераспределение остатков между складами» (redistributionSellerGoodsOneWarehouse).
+ * Без неё перемещения невозможны.
+ * Возвращает { active: boolean, status: string, expiredAt: string|null }
+ */
+async function checkRedistributionOption(sessionToken, sessionCookies = null) {
+  if (!sessionToken || !sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs')) {
+    return { active: false, status: 'no_session', error: 'Нужна SMS авторизация' };
+  }
+  try {
+    const headers = {
+      Authorizev3:    sessionToken,
+      'Content-Type': 'application/json',
+      Accept:         '*/*',
+      Origin:         'https://seller.wildberries.ru',
+      Referer:        'https://seller.wildberries.ru/tariff-constructor',
+      'User-Agent':   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    };
+    if (sessionCookies) headers['Cookie'] = sessionCookies;
+
+    const res = await axios.post(
+      'https://seller.wildberries.ru/ns/configurator-options/seller-tariffs/options/list',
+      { jsonrpc: '2.0', id: `json-rpc_${Math.floor(Math.random()*100000)}` },
+      { headers, timeout: 15000, validateStatus: () => true }
+    );
+
+    const options = res.data?.result?.options || [];
+    const opt = options.find(o => o.publicSlug === 'redistributionSellerGoodsOneWarehouse');
+    if (!opt) {
+      return { active: false, status: 'not_found', error: 'Опция не найдена' };
+    }
+    const active = opt.status === 'activated';
+    console.log(`[redistribution-option] status=${opt.status} active=${active}`);
+    return {
+      active,
+      status: opt.status,
+      expiredAt: opt.activatedData?.expiredAt || null,
+    };
+  } catch (e) {
+    console.warn('[redistribution-option] check failed:', e.message);
+    // При ошибке не блокируем — возвращаем unknown
+    return { active: null, status: 'check_failed', error: e.message };
+  }
+}
+
 module.exports = {
   getWarehouses, getStocks, updateStocks, deleteStocks,
   getCardsList, getAllCards, extractSkusFromCards,
   getArticleByNmId, getArticleStocks, getFboStocksRaw, getWbFboWarehouseNames,
   getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList,
+  checkRedistributionOption,
 };

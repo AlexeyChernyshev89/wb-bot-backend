@@ -10,7 +10,7 @@ const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList } = require('./wb-api');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption } = require('./wb-api');
 const axios = require('axios');
 const path = require('path');
 const fs   = require('fs');
@@ -1161,6 +1161,22 @@ app.get('/auth/session-status', telegramAuth, requireDB, async (req, res) => {
     res.json({ active: true, updated_at: updatedAt, age_hours: ageHours });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /transfers/check-option
+ * Проверяет подключена ли платная опция «Перераспределение остатков между складами».
+ * Без неё перемещения невозможны — фронтенд предупреждает пользователя.
+ */
+app.get('/transfers/check-option', telegramAuth, requireDB, async (req, res) => {
+  try {
+    const { token: sessionToken, cookies: sessionCookies } = await getUserSessionToken(req.telegramId);
+    const result = await checkRedistributionOption(sessionToken, sessionCookies);
+    res.json(result);
+  } catch (err) {
+    console.error('check-option error:', err.message);
+    res.json({ active: null, status: 'error', error: err.message });
   }
 });
 

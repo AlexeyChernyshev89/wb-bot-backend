@@ -457,6 +457,8 @@
   <div class="form-card">
     <div class="form-title">Новый запрос на перемещение</div>
 
+    <div id="optionWarning" style="display:none;background:rgba(255,140,0,0.15);border:1px solid rgba(255,140,0,0.4);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;line-height:1.4;color:#ffb060"></div>
+
     <!-- Шаг 1: Поставщик -->
     <div class="field-group" id="stepSupplier">
       <div class="search-field" id="sfSupplier" onclick="toggleDrop('dropSupplier','sfSupplier')">
@@ -1141,6 +1143,9 @@ function resetCreateForm() {
   document.getElementById('qtyInput').value = '';
   document.getElementById('articleStatus').textContent = '';
   document.getElementById('createMsg').className = 'msg';
+  // Явно очищаем поля складов и карточки (иначе остаются от прошлой заявки)
+  const fromI = document.getElementById('fromInput'); if (fromI) fromI.value = '';
+  const toI   = document.getElementById('toInput');   if (toI)   toI.value = '';
   hideDrop('dropSupplier');
   hideDrop('dropFrom');
   hideDrop('dropTo');
@@ -1175,6 +1180,25 @@ function selectSupplier(name) {
   document.getElementById('clearSupplier').style.display = 'block';
   hideDrop('dropSupplier');
   document.getElementById('stepArticle').classList.add('on');
+  // Проверяем подключена ли платная опция перемещения остатков
+  checkRedistributionOption();
+}
+
+async function checkRedistributionOption() {
+  try {
+    const r = await api('GET', '/transfers/check-option');
+    const banner = document.getElementById('optionWarning');
+    if (r.active === false) {
+      if (banner) {
+        banner.style.display = 'block';
+        banner.innerHTML = '⚠️ Опция <b>«Перераспределение остатков между складами»</b> не подключена в вашем ЛК WB. Без неё перемещения невозможны. Подключите её в разделе «Тарифы» → Конструктор тарифов.';
+      }
+    } else if (banner) {
+      banner.style.display = 'none';
+    }
+  } catch (e) {
+    // тихо — не блокируем создание
+  }
 }
 
 function clearField(field, e) {
