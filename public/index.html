@@ -1338,6 +1338,9 @@ async function saveRequest() {
       sku: String(card.nmId), amount: qty,
       product_name: card.name || null
     });
+    // Очищаем состояние формы чтобы следующая заявка была пустой
+    _state = {};
+    btn.innerHTML = 'Сохранить'; btn.disabled = false;
     go('list');
   } catch(e) {
     showMsg('createMsg','error', e.message);
