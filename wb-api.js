@@ -721,10 +721,16 @@ async function checkRedistributionOption(sessionToken, sessionCookies = null) {
       { headers, timeout: 15000, validateStatus: () => true }
     );
 
-    const options = res.data?.result?.options || [];
+    const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+    console.log(`[redistribution-option] HTTP ${res.status} | body: ${bodyStr.substring(0, 200)}`);
+
+    const options = res.data?.result?.options || res.data?.options || [];
     const opt = options.find(o => o.publicSlug === 'redistributionSellerGoodsOneWarehouse');
     if (!opt) {
-      return { active: false, status: 'not_found', error: 'Опция не найдена' };
+      // Если список опций пустой или endpoint вернул не то — НЕ блокируем (unknown),
+      // чтобы ложно не запрещать создание заявок
+      console.warn(`[redistribution-option] опция не найдена среди ${options.length} опций (HTTP ${res.status})`);
+      return { active: null, status: 'not_found', error: 'Опция не найдена в ответе' };
     }
     const active = opt.status === 'activated';
     console.log(`[redistribution-option] status=${opt.status} active=${active}`);
