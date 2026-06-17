@@ -590,7 +590,9 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
       { headers, timeout: 15000, validateStatus: () => true }
     );
     const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${bodyStr.substring(0, 150)}`);
+    // Для /create логируем ПОЛНЫЙ ответ — критично для подтверждения реального перемещения
+    const logLen = endpoint === '/create' ? 600 : 150;
+    console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${bodyStr.substring(0, logLen)}`);
 
     if (res.status === 401 || res.status === 403) {
       const wbMsg = typeof res.data === 'string' ? res.data : (res.data?.message || res.data?.error || '');
@@ -659,13 +661,28 @@ async function getTransferStockByWarehouse(sessionToken, nmId, sessionCookies = 
  * params: { nmID, chrtID, srcOfficeID, dstOfficeID, count }
  */
 async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOfficeId, amount }, sessionCookies = null) {
-  return sellerSupplyPost(sessionToken, '/create', {
+  const result = await sellerSupplyPost(sessionToken, '/create', {
     nmID:        Number(nmId),
     chrtID:      chrtId ? Number(chrtId) : undefined,
     srcOfficeID: Number(fromOfficeId),
     dstOfficeID: Number(toOfficeId),
     count:       Number(amount),
   }, sessionCookies);
+
+  // Проверяем что WB реально подтвердил создание.
+  // Пустой result ({}, null, "") при HTTP 200 означает что запрос принят,
+  // но перемещение НЕ создано (неверный формат полей или endpoint).
+  const isEmpty = result == null
+    || (typeof result === 'object' && Object.keys(result).length === 0)
+    || result === '';
+  if (isEmpty) {
+    const e = new Error('WB вернул пустой ответ на создание перемещения — перемещение НЕ подтверждено. Формат запроса /create требует проверки.');
+    e.status = 502;
+    e.emptyCreate = true;
+    throw e;
+  }
+
+  return result;
 }
 
 /**
