@@ -609,22 +609,28 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
     // JSON-RPC ошибка приходит в поле error
     if (res.data && typeof res.data === 'object' && res.data.error) {
       const rpcErr = res.data.error;
-      const e = new Error(rpcErr.message || rpcErr.data || `JSON-RPC error ${rpcErr.code}`);
-      e.status = res.status;
-      e.wbDetail = rpcErr;
+      const e = new Error(rpcErr.message || rpcErr.data?.msg || `JSON-RPC error ${rpcErr.code}`);
+      e.status = res.status || 400;
+      e.wbDetail = rpcErr.message || rpcErr.data?.msg;
+      e.rpcError = rpcErr;
+      e.isRpcError = true;
+      // Распознаём ошибку капчи
+      if (rpcErr.code === -32002 || /капч|captcha/i.test(rpcErr.message || '')) {
+        e.captchaRequired = true;
+      }
       throw e;
     }
 
     // Возвращаем result из JSON-RPC ответа (или весь body если структура иная)
     return res.data?.result ?? res.data;
   } catch (err) {
-    if (err.sessionExpired) throw err;
+    if (err.sessionExpired || err.isRpcError) throw err; // не перезаписываем распознанные ошибки
     const status = err.response?.status;
     const detail = err.response?.data;
     console.error(`[seller-supply] ${endpoint} → ${status}:`, JSON.stringify(detail));
     const e = new Error(detail?.message || detail?.error || detail?.detail || `Ошибка seller-supply API ${status}`);
     e.status = status;
-    e.wbDetail = detail;
+    e.wbDetail = detail?.message || detail?.error;
     if (status === 401 || status === 403) e.sessionExpired = true;
     throw e;
   }
@@ -657,13 +663,13 @@ async function getTransferStockByWarehouse(sessionToken, nmId, sessionCookies = 
 
 /**
  * Создать FBO-перемещение.
- * Реальный endpoint: POST /transfer/order
- * Точный формат (из DevTools):
- *   { transfers: [ { nmID, srcOfficeID, items: [ { dstOfficeID, chrtID, count } ] } ] }
- * Ответ: result.file (base64 Excel-накладная) — подтверждение успеха.
+ * WB требует captcha-токен для /transfer/order, который генерируется только
+ * в браузере. Поэтому вызываем через Windows-прокси /transfer-order, где
+ * Puppeteer выполняет запрос из контекста страницы (браузер сам проходит капчу).
+ * Формат: { transfers: [ { nmID, srcOfficeID, items: [ { dstOfficeID, chrtID, count } ] } ] }
  */
 async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOfficeId, amount }, sessionCookies = null) {
-  const transferItem = {
+  const transfers = [{
     nmID:        Number(nmId),
     srcOfficeID: Number(fromOfficeId),
     items: [
@@ -673,13 +679,51 @@ async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOf
         count:       Number(amount),
       },
     ],
-  };
+  }];
 
-  const result = await sellerSupplyPost(sessionToken, '/order', {
-    transfers: [transferItem],
-  }, sessionCookies);
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl) {
+    const e = new Error('Прокси не настроен (нет YANDEX_FN_URL) — создание перемещения невозможно');
+    e.status = 503;
+    throw e;
+  }
 
-  // Успех = WB вернул file (Excel-накладную) или непустой объект.
+  // Вызываем через браузерный прокси чтобы пройти captcha
+  let res;
+  try {
+    res = await axios.post(
+      `${proxyUrl}/transfer-order`,
+      { token: sessionToken, cookies: sessionCookies || '', transfers },
+      {
+        timeout: 60000, // запуск браузера занимает время
+        headers: { 'ngrok-skip-browser-warning': 'true', 'User-Agent': 'wb-bot-backend' },
+        validateStatus: () => true,
+      }
+    );
+  } catch (err) {
+    const e = new Error(`Прокси недоступен для создания перемещения: ${err.message}`);
+    e.status = 503;
+    throw e;
+  }
+
+  const payload = res.data || {};
+  console.log(`[createWbTransfer] прокси вернул HTTP ${payload.status} | ${JSON.stringify(payload.data || payload.error).substring(0, 200)}`);
+
+  // Проверяем ответ WB (через прокси)
+  const wbData = payload.data;
+  // JSON-RPC ошибка (включая капчу)
+  if (wbData && typeof wbData === 'object' && wbData.error) {
+    const rpcErr = wbData.error;
+    const e = new Error(rpcErr.message || rpcErr.data?.msg || `WB error ${rpcErr.code}`);
+    e.status = 400;
+    e.wbDetail = rpcErr.message;
+    if (rpcErr.code === -32002 || /капч|captcha/i.test(rpcErr.message || '')) {
+      e.captchaRequired = true;
+    }
+    throw e;
+  }
+
+  const result = wbData?.result ?? wbData;
   const hasFile = result && (result.file || result.mime);
   const isEmpty = result == null
     || (typeof result === 'object' && Object.keys(result).length === 0)
@@ -691,7 +735,7 @@ async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOf
     throw e;
   }
 
-  console.log(`[seller-supply] /order успех: ${hasFile ? 'получена накладная (file)' : 'непустой ответ'}`);
+  console.log(`[createWbTransfer] ✅ ${hasFile ? 'получена накладная (file)' : 'успех'}`);
   return result;
 }
 
