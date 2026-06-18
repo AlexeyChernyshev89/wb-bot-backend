@@ -591,7 +591,7 @@ async function sellerSupplyPost(sessionToken, endpoint, body = {}, sessionCookie
     );
     const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
     // Для /create логируем ПОЛНЫЙ ответ — критично для подтверждения реального перемещения
-    const logLen = endpoint === '/create' ? 600 : 150;
+    const logLen = (endpoint === '/create' || endpoint === '/order') ? 600 : 150;
     console.log(`[seller-supply] ${endpoint} → HTTP ${res.status} | body: ${bodyStr.substring(0, logLen)}`);
 
     if (res.status === 401 || res.status === 403) {
@@ -657,31 +657,41 @@ async function getTransferStockByWarehouse(sessionToken, nmId, sessionCookies = 
 
 /**
  * Создать FBO-перемещение.
- * Формат тела определяется реальным запросом ЛК (JSON-RPC params).
- * params: { nmID, chrtID, srcOfficeID, dstOfficeID, count }
+ * Реальный endpoint: POST /transfer/order
+ * Точный формат (из DevTools):
+ *   { transfers: [ { nmID, srcOfficeID, items: [ { dstOfficeID, chrtID, count } ] } ] }
+ * Ответ: result.file (base64 Excel-накладная) — подтверждение успеха.
  */
 async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOfficeId, amount }, sessionCookies = null) {
-  const result = await sellerSupplyPost(sessionToken, '/create', {
+  const transferItem = {
     nmID:        Number(nmId),
-    chrtID:      chrtId ? Number(chrtId) : undefined,
     srcOfficeID: Number(fromOfficeId),
-    dstOfficeID: Number(toOfficeId),
-    count:       Number(amount),
+    items: [
+      {
+        dstOfficeID: Number(toOfficeId),
+        chrtID:      Number(chrtId),
+        count:       Number(amount),
+      },
+    ],
+  };
+
+  const result = await sellerSupplyPost(sessionToken, '/order', {
+    transfers: [transferItem],
   }, sessionCookies);
 
-  // Проверяем что WB реально подтвердил создание.
-  // Пустой result ({}, null, "") при HTTP 200 означает что запрос принят,
-  // но перемещение НЕ создано (неверный формат полей или endpoint).
+  // Успех = WB вернул file (Excel-накладную) или непустой объект.
+  const hasFile = result && (result.file || result.mime);
   const isEmpty = result == null
     || (typeof result === 'object' && Object.keys(result).length === 0)
     || result === '';
   if (isEmpty) {
-    const e = new Error('WB вернул пустой ответ на создание перемещения — перемещение НЕ подтверждено. Формат запроса /create требует проверки.');
+    const e = new Error('WB вернул пустой ответ на /transfer/order — перемещение НЕ подтверждено.');
     e.status = 502;
     e.emptyCreate = true;
     throw e;
   }
 
+  console.log(`[seller-supply] /order успех: ${hasFile ? 'получена накладная (file)' : 'непустой ответ'}`);
   return result;
 }
 
