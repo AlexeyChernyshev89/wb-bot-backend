@@ -800,10 +800,61 @@ async function checkRedistributionOption(sessionToken, sessionCookies = null) {
   }
 }
 
+/**
+ * Обновляет сессию WB через /auth/token, используя текущий (возможно скоро
+ * истекающий) Authorizev3 + куки. Возвращает свежий токен — БЕЗ SMS и браузера.
+ * Это делает SMS-вход одноразовым: пока запрос проходит, сессия живёт вечно.
+ *
+ * Endpoint: POST /ns/suppliers-auth/suppliers-portal-core/auth/token
+ * Тело: { jsonrpc:"2.0", id:"...", params:{} }
+ * Ответ: result.data.token (новый), exp, userID
+ *
+ * Возвращает { token, exp } или null если обновить не удалось (нужен SMS).
+ */
+async function refreshWbSession(currentToken, sessionCookies) {
+  if (!currentToken) return null;
+  try {
+    const headers = {
+      Authorizev3:    currentToken,
+      'Content-Type': 'application/json',
+      Accept:         '*/*',
+      Origin:         'https://seller.wildberries.ru',
+      Referer:        'https://seller.wildberries.ru/',
+      'User-Agent':   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    };
+    if (sessionCookies) headers['Cookie'] = sessionCookies;
+
+    const res = await axios.post(
+      'https://seller.wildberries.ru/ns/suppliers-auth/suppliers-portal-core/auth/token',
+      { jsonrpc: '2.0', id: `json-rpc_${Math.floor(Math.random()*100000)}`, params: {} },
+      { headers, timeout: 15000, validateStatus: () => true }
+    );
+
+    const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+    console.log(`[refresh-session] HTTP ${res.status} | ${bodyStr.substring(0, 150)}`);
+
+    if (res.status === 200 && res.data?.result?.data?.token) {
+      const data = res.data.result.data;
+      console.log(`[refresh-session] ✅ токен обновлён, exp=${data.exp}`);
+      return { token: data.token, exp: data.exp, userID: data.userID };
+    }
+    // 401/403 — сессия совсем истекла, нужен SMS
+    if (res.status === 401 || res.status === 403) {
+      console.warn('[refresh-session] ⚠️ сессия истекла полностью — нужен повторный SMS-вход');
+      return null;
+    }
+    return null;
+  } catch (e) {
+    console.warn('[refresh-session] ошибка:', e.message);
+    return null;
+  }
+}
+
 module.exports = {
   getWarehouses, getStocks, updateStocks, deleteStocks,
   getCardsList, getAllCards, extractSkusFromCards,
   getArticleByNmId, getArticleStocks, getFboStocksRaw, getWbFboWarehouseNames,
   getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList,
   checkRedistributionOption,
+  refreshWbSession,
 };

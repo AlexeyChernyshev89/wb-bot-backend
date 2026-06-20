@@ -10,7 +10,7 @@ const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption } = require('./wb-api');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption, refreshWbSession } = require('./wb-api');
 const axios = require('axios');
 const path = require('path');
 const fs   = require('fs');
@@ -212,11 +212,56 @@ async function telegramAuth(req, res, next) {
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 async function getUserSessionToken(telegramId) {
-  const r = await db.query('SELECT wb_session_token, wb_token, wb_session_cookies FROM users WHERE telegram_id=$1', [telegramId]);
+  const r = await db.query('SELECT wb_session_token, wb_token, wb_session_cookies, wb_session_updated FROM users WHERE telegram_id=$1', [telegramId]);
   const row = r.rows[0];
+  let token   = row?.wb_session_token || null;
+  let cookies = row?.wb_session_cookies || null;
+
+  // Авто-обновление сессии: если токен скоро истекает — обновляем через /auth/token
+  // (без SMS). Это делает SMS-вход одноразовым для пользователя.
+  if (token && token.startsWith('eyJhbGciOiJSUzI1NiIs')) {
+    let needRefresh = false;
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+      // iat есть, exp может не быть — обновляем если прошло > 2 часов с выпуска
+      const ageSec = Math.floor(Date.now() / 1000) - (payload.iat || 0);
+      if (payload.exp) {
+        // обновляем за 5 мин до истечения
+        needRefresh = (payload.exp - Math.floor(Date.now() / 1000)) < 300;
+      } else {
+        needRefresh = ageSec > 2 * 3600;
+      }
+    } catch { needRefresh = false; }
+
+    if (needRefresh) {
+      console.log(`[session] токен пользователя ${telegramId} устарел — обновляю через /auth/token`);
+      const refreshed = await refreshWbSession(token, cookies);
+      if (refreshed?.token) {
+        // ВАЖНО: /auth/token возвращает wb-seller-lk (EdDSA) токен, а не Authorizev3.
+        // Обновляем wb-seller-lk в куках, основной Authorizev3 остаётся (его освежает
+        // браузерная сессия). Сохраняем новый токен и время.
+        // Обновляем wb-seller-lk куку новым значением
+        if (cookies) {
+          if (/wb-seller-lk=/.test(cookies)) {
+            cookies = cookies.replace(/wb-seller-lk=[^;]+/, `wb-seller-lk=${refreshed.token}`);
+          } else {
+            cookies += `; wb-seller-lk=${refreshed.token}`;
+          }
+        }
+        await db.query(
+          'UPDATE users SET wb_session_cookies=$1, wb_session_updated=NOW() WHERE telegram_id=$2',
+          [cookies, telegramId]
+        );
+        console.log(`[session] ✅ сессия пользователя ${telegramId} обновлена без SMS`);
+      } else {
+        console.warn(`[session] ⚠️ не удалось обновить сессию ${telegramId} — может потребоваться SMS`);
+      }
+    }
+  }
+
   return {
-    token: row?.wb_session_token || row?.wb_token || null,
-    cookies: row?.wb_session_cookies || null
+    token: token || row?.wb_token || null,
+    cookies: cookies
   };
 }
 
