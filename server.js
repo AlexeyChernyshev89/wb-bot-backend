@@ -1579,8 +1579,23 @@ async function processRequest(req) {
   try {
     const result = await executeRedistribution(req.wb_token, req);
 
-    const total    = Number(req.amount);
-    const wasMoved = result && result.wasMoved ? result.wasMoved : total;
+    const total = Number(req.amount);
+
+    // Успех ТОЛЬКО при явном подтверждении перемещения от WB.
+    // Если result пустой/без wasMoved — это НЕ успех (защита от ложных «выполнена»).
+    if (!result || typeof result.wasMoved !== 'number' || result.wasMoved <= (req.moved || 0)) {
+      // Перемещение не подтверждено — повторяем, НЕ уведомляем об успехе
+      const nextRetry = new Date(Date.now() + RETRY_409_DELAY);
+      const newCount  = req.retry_count + 1;
+      await db.query(
+        `UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4`,
+        [nextRetry, newCount, 'Перемещение не подтверждено WB, повтор', req.id]
+      );
+      console.log(`[worker] ⚠️ #${req.id} перемещение не подтверждено (result пустой) — повтор`);
+      return;
+    }
+
+    const wasMoved = result.wasMoved;
 
     if (wasMoved >= total) {
       // ✅ Полностью перемещено

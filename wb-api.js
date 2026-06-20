@@ -715,10 +715,13 @@ async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOf
   if (wbData && typeof wbData === 'object' && wbData.error) {
     const rpcErr = wbData.error;
     const e = new Error(rpcErr.message || rpcErr.data?.msg || `WB error ${rpcErr.code}`);
-    e.status = 400;
     e.wbDetail = rpcErr.message;
     if (rpcErr.code === -32002 || /капч|captcha/i.test(rpcErr.message || '')) {
+      // Капча — временное препятствие, повторяем (НЕ permanent fail, НЕ успех)
       e.captchaRequired = true;
+      e.status = 409;
+    } else {
+      e.status = 400;
     }
     throw e;
   }
