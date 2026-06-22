@@ -10,7 +10,7 @@ const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption, refreshWbSession } = require('./wb-api');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption, refreshWbSession, fetchSupplierId } = require('./wb-api');
 const axios = require('axios');
 const path = require('path');
 const fs   = require('fs');
@@ -52,6 +52,7 @@ async function initDB() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMP DEFAULT NOW();
     ALTER TABLE users ADD COLUMN IF NOT EXISTS username           VARCHAR(255);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS wb_session_cookies TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS wb_supplier_id     VARCHAR(64);
 
     CREATE TABLE IF NOT EXISTS sms_requests (
       telegram_id  BIGINT PRIMARY KEY,
@@ -212,10 +213,27 @@ async function telegramAuth(req, res, next) {
 
 // ─── Вспомогательные функции ─────────────────────────────────────────────────
 async function getUserSessionToken(telegramId) {
-  const r = await db.query('SELECT wb_session_token, wb_token, wb_session_cookies, wb_session_updated FROM users WHERE telegram_id=$1', [telegramId]);
+  const r = await db.query('SELECT wb_session_token, wb_token, wb_session_cookies, wb_session_updated, wb_supplier_id FROM users WHERE telegram_id=$1', [telegramId]);
   const row = r.rows[0];
   let token   = row?.wb_session_token || null;
   let cookies = row?.wb_session_cookies || null;
+  let supplierId = row?.wb_supplier_id || null;
+
+  // Если supplier id ещё не сохранён — получаем его сейчас и сохраняем
+  if (token && token.startsWith('eyJhbGciOiJSUzI1NiIs') && !supplierId) {
+    try {
+      supplierId = await fetchSupplierId(token, cookies);
+      if (supplierId) {
+        await db.query('UPDATE users SET wb_supplier_id=$1 WHERE telegram_id=$2', [supplierId, telegramId]);
+        console.log(`[session] supplier id получен и сохранён: ${supplierId}`);
+      }
+    } catch {}
+  }
+
+  // Подставляем supplier id в куки (seller-supply требует x-supplier-id)
+  if (supplierId && cookies && !cookies.includes('x-supplier-id=')) {
+    cookies += `; x-supplier-id=${supplierId}; x-supplier-id-external=${supplierId}`;
+  }
 
   // Авто-обновление сессии: если токен скоро истекает — обновляем через /auth/token
   // (без SMS). Это делает SMS-вход одноразовым для пользователя.
@@ -1145,6 +1163,20 @@ app.post('/auth/verify-sms', telegramAuth, requireDB, async (req, res) => {
       [req.telegramId]
     );
     console.log('[verify-sms] DB check after save:', JSON.stringify(checkRes.rows[0]));
+
+    // Получаем supplier id по сессии и сохраняем (для seller-supply API).
+    // Это мультипользовательское решение: каждый юзер получает СВОЙ supplier id.
+    try {
+      const supplierId = await fetchSupplierId(result.sessionToken, result.cookies);
+      if (supplierId) {
+        await db.query('UPDATE users SET wb_supplier_id=$1 WHERE telegram_id=$2', [supplierId, req.telegramId]);
+        console.log(`[verify-sms] ✅ supplier id сохранён: ${supplierId}`);
+      } else {
+        console.warn('[verify-sms] ⚠️ supplier id не получен — seller-supply может вернуть 401');
+      }
+    } catch (e) {
+      console.warn('[verify-sms] ошибка получения supplier id:', e.message);
+    }
 
     // Удаляем временный SMS-запрос
     await db.query('DELETE FROM sms_requests WHERE telegram_id=$1', [req.telegramId]);

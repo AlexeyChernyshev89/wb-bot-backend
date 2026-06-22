@@ -853,6 +853,55 @@ async function refreshWbSession(currentToken, sessionCookies) {
   }
 }
 
+/**
+ * Получает supplier id пользователя по его сессии (Authorizev3).
+ * Endpoint: POST /ns/suppliers/suppliers-portal-core/suppliers (метод getUserSuppliers)
+ * Ответ: result.suppliers[].id — UUID продавца.
+ * Это мультипользовательское решение: каждый юзер получает СВОЙ supplier id.
+ * Возвращает supplierId (UUID) или null.
+ */
+async function fetchSupplierId(sessionToken, sessionCookies = null) {
+  if (!sessionToken || !sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs')) return null;
+  try {
+    const headers = {
+      Authorizev3:    sessionToken,
+      'Content-Type': 'application/json',
+      Accept:         '*/*',
+      Origin:         'https://seller.wildberries.ru',
+      Referer:        'https://seller.wildberries.ru/',
+      'User-Agent':   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    };
+    if (sessionCookies) headers['Cookie'] = sessionCookies;
+
+    const res = await axios.post(
+      'https://seller.wildberries.ru/ns/suppliers/suppliers-portal-core/suppliers',
+      { method: 'getUserSuppliers', params: {}, id: `json-rpc_${Math.floor(Math.random()*100000)}`, jsonrpc: '2.0' },
+      { headers, timeout: 15000, validateStatus: () => true }
+    );
+
+    const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+    console.log(`[fetch-supplier-id] HTTP ${res.status} | ${bodyStr.substring(0, 120)}`);
+
+    // Ответ может быть объектом или массивом (batch JSON-RPC)
+    let suppliers = null;
+    if (Array.isArray(res.data)) {
+      const item = res.data.find(x => x?.result?.suppliers);
+      suppliers = item?.result?.suppliers;
+    } else {
+      suppliers = res.data?.result?.suppliers;
+    }
+    if (suppliers && suppliers.length > 0 && suppliers[0].id) {
+      console.log(`[fetch-supplier-id] ✅ supplier id: ${suppliers[0].id}`);
+      return suppliers[0].id;
+    }
+    console.warn('[fetch-supplier-id] supplier id не найден в ответе');
+    return null;
+  } catch (e) {
+    console.warn('[fetch-supplier-id] ошибка:', e.message);
+    return null;
+  }
+}
+
 module.exports = {
   getWarehouses, getStocks, updateStocks, deleteStocks,
   getCardsList, getAllCards, extractSkusFromCards,
@@ -860,4 +909,5 @@ module.exports = {
   getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList,
   checkRedistributionOption,
   refreshWbSession,
+  fetchSupplierId,
 };
