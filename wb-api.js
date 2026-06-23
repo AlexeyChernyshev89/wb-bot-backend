@@ -927,6 +927,43 @@ async function fetchSupplierId(sessionToken, sessionCookies = null) {
  *  3. POST снова с solution → secureToken
  * Возвращает secureToken для заголовка X-Wb-Captcha-Token, или null.
  */
+const ANTIBOT_FINGERPRINT = require('./antibot-fingerprint');
+
+/**
+ * Извлекает challenge id из challenge.payload.
+ * payload = <мусор>base64(base64(JSON)).<подпись>. JSON содержит {id, ip, timestamp}.
+ */
+function parseChallenge(payload) {
+  try {
+    const idx = payload.indexOf('ZXlK');     // base64 от 'eyJ'
+    if (idx < 0) return null;
+    let inner = payload.slice(idx).split('.')[0];
+    inner += '='.repeat((4 - (inner.length % 4)) % 4);
+    let lvl1 = Buffer.from(inner, 'base64').toString('utf8');
+    lvl1 += '='.repeat((4 - (lvl1.length % 4)) % 4);
+    const lvl2 = Buffer.from(lvl1, 'base64').toString('utf8');
+    const m = lvl2.match(/"id":"([0-9a-f-]{36})"/);
+    const ipM = lvl2.match(/"ip":"([0-9.]+)"/);
+    return { id: m ? m[1] : null, ip: ipM ? ipM[1] : null };
+  } catch { return null; }
+}
+
+/**
+ * Собирает solution.payload по алгоритму WB (расшифрован из реального запроса):
+ *   solution.payload = base64( hexCsv( XOR( JSON(fingerprint), challengeId ) ) )
+ * Ключ XOR — это challenge id. hash пустой — WB не проверяет содержимое fingerprint.
+ */
+function buildSolutionPayload(challengeId, fingerprint) {
+  const json = JSON.stringify(fingerprint);
+  const key = Buffer.from(challengeId, 'utf8');
+  const src = Buffer.from(json, 'utf8');
+  const xored = Buffer.alloc(src.length);
+  for (let i = 0; i < src.length; i++) xored[i] = src[i] ^ key[i % key.length];
+  // hex через запятую (формат WB, без завершающей запятой)
+  const hexCsv = Array.from(xored).map(b => b.toString(16)).join(',');
+  return Buffer.from(hexCsv, 'utf8').toString('base64');
+}
+
 async function getAntibotToken(action, sessionCookies = null) {
   const ANTIBOT = 'https://antibot.wildberries.ru/api/v1/create-one-time-token';
   // Статичные заголовки SDK (из реальных запросов)
@@ -955,11 +992,20 @@ async function getAntibotToken(action, sessionCookies = null) {
     }
 
     const challenge = r1.data.challenge;
-    // Шаг 2: формируем solution. hash пустой — сервер не проверяет fingerprint.
-    const solution = {
-      payload: challenge.payload,           // эхо challenge payload
-      hash: '',                             // пустой хэш (капча мягкая)
-    };
+    // Извлекаем challenge id (ключ XOR)
+    const parsed = parseChallenge(challenge.payload);
+    if (!parsed || !parsed.id) {
+      console.warn('[antibot] не удалось извлечь challenge id');
+      return null;
+    }
+    console.log(`[antibot] challenge id: ${parsed.id}`);
+
+    // Собираем fingerprint: берём эталон, обновляем динамичные поля
+    const fp = JSON.parse(JSON.stringify(ANTIBOT_FINGERPRINT));
+
+    // Шаг 2: формируем solution.payload по алгоритму WB
+    const solutionPayload = buildSolutionPayload(parsed.id, fp);
+    const solution = { payload: solutionPayload };
 
     // Шаг 3: повторный запрос с solution
     const r2 = await axios.post(
