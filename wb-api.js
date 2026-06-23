@@ -681,52 +681,68 @@ async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOf
     ],
   }];
 
-  const proxyUrl = getProxyUrl();
-  if (!proxyUrl) {
-    const e = new Error('Прокси не настроен (нет YANDEX_FN_URL) — создание перемещения невозможно');
-    e.status = 503;
+  // Шаг 1: получаем antibot captcha-токен ПРОГРАММНО (без браузера)
+  const captchaToken = await getAntibotToken('TRANSFER_REMAINS_ORDER', sessionCookies);
+  if (!captchaToken) {
+    const e = new Error('Не удалось получить antibot captcha-токен');
+    e.status = 409;          // повторяем
+    e.captchaRequired = true;
     throw e;
   }
 
-  // Вызываем через браузерный прокси чтобы пройти captcha
+  // Шаг 2: создаём перемещение напрямую с captcha-токеном
+  const supplierId = getSupplierId(sessionCookies, sessionToken);
+  const headers = {
+    Authorizev3:            sessionToken,
+    'Content-Type':         'application/json',
+    Accept:                 '*/*',
+    Origin:                 'https://seller.wildberries.ru',
+    Referer:                'https://seller.wildberries.ru/',
+    'User-Agent':           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+    'X-Wb-Captcha-Token':   captchaToken,
+    'X-Wb-Captcha-Latency': '700',
+    'Root-Version':         'v1.98.0',
+  };
+  if (sessionCookies) headers['Cookie'] = sessionCookies;
+  if (supplierId)     headers['X-Supplier-Id'] = supplierId;
+
+  const body = {
+    jsonrpc: '2.0',
+    id: `json-rpc_${Math.floor(Math.random()*100000)}`,
+    params: { transfers },
+  };
+
   let res;
   try {
     res = await axios.post(
-      `${proxyUrl}/transfer-order`,
-      { token: sessionToken, cookies: sessionCookies || '', transfers },
-      {
-        timeout: 60000, // запуск браузера занимает время
-        headers: { 'ngrok-skip-browser-warning': 'true', 'User-Agent': 'wb-bot-backend' },
-        validateStatus: () => true,
-      }
+      `${WB_SELLER_SUPPLY}${TRANSFER_PATH}/order`,
+      body,
+      { headers, timeout: 20000, validateStatus: () => true }
     );
   } catch (err) {
-    const e = new Error(`Прокси недоступен для создания перемещения: ${err.message}`);
+    const e = new Error(`Ошибка сети при создании перемещения: ${err.message}`);
     e.status = 503;
     throw e;
   }
 
-  const payload = res.data || {};
-  console.log(`[createWbTransfer] прокси вернул HTTP ${payload.status} | ${JSON.stringify(payload.data || payload.error).substring(0, 200)}`);
+  const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+  console.log(`[createWbTransfer] /order HTTP ${res.status} | ${bodyStr.substring(0, 200)}`);
 
-  // Проверяем ответ WB (через прокси)
-  const wbData = payload.data;
   // JSON-RPC ошибка (включая капчу)
-  if (wbData && typeof wbData === 'object' && wbData.error) {
-    const rpcErr = wbData.error;
+  if (res.data && typeof res.data === 'object' && res.data.error) {
+    const rpcErr = res.data.error;
     const e = new Error(rpcErr.message || rpcErr.data?.msg || `WB error ${rpcErr.code}`);
     e.wbDetail = rpcErr.message;
     if (rpcErr.code === -32002 || /капч|captcha/i.test(rpcErr.message || '')) {
-      // Капча — временное препятствие, повторяем (НЕ permanent fail, НЕ успех)
       e.captchaRequired = true;
-      e.status = 409;
+      e.status = 409;        // капча — повторяем
     } else {
       e.status = 400;
     }
     throw e;
   }
 
-  const result = wbData?.result ?? wbData;
+  const result = res.data?.result ?? res.data;
   const hasFile = result && (result.file || result.mime);
   const isEmpty = result == null
     || (typeof result === 'object' && Object.keys(result).length === 0)
@@ -898,6 +914,68 @@ async function fetchSupplierId(sessionToken, sessionCookies = null) {
     return null;
   } catch (e) {
     console.warn('[fetch-supplier-id] ошибка:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Программно проходит antibot-капчу WB БЕЗ браузера (масштабируется).
+ * Механизм (расшифрован из реальных запросов):
+ *  1. POST create-one-time-token {action} → 498 + challenge.payload
+ *  2. challenge.payload содержит зашифрованный challenge; solution = payload + hash
+ *     ВАЖНО: hash пустой ({"hash":""}) — капча мягкая, fingerprint не проверяется
+ *  3. POST снова с solution → secureToken
+ * Возвращает secureToken для заголовка X-Wb-Captcha-Token, или null.
+ */
+async function getAntibotToken(action, sessionCookies = null) {
+  const ANTIBOT = 'https://antibot.wildberries.ru/api/v1/create-one-time-token';
+  // Статичные заголовки SDK (из реальных запросов)
+  const headers = {
+    'Content-Type':            'application/json',
+    Accept:                    '*/*',
+    Origin:                    'https://seller.wildberries.ru',
+    Referer:                   'https://seller.wildberries.ru/',
+    'User-Agent':              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+    'X-Wb-Antibot-Sdk-Version':'js-front-desktop/3.0.8',
+  };
+  if (sessionCookies) headers['Cookie'] = sessionCookies;
+
+  try {
+    // Шаг 1: запрос challenge
+    const r1 = await axios.post(ANTIBOT, { action }, { headers, timeout: 15000, validateStatus: () => true });
+    console.log(`[antibot] step1 HTTP ${r1.status}`);
+
+    if (r1.status === 200 && r1.data?.secureToken) {
+      return r1.data.secureToken; // токен выдан сразу
+    }
+    if (r1.status !== 498 || !r1.data?.challenge) {
+      console.warn(`[antibot] неожиданный ответ: ${JSON.stringify(r1.data).substring(0,150)}`);
+      return null;
+    }
+
+    const challenge = r1.data.challenge;
+    // Шаг 2: формируем solution. hash пустой — сервер не проверяет fingerprint.
+    const solution = {
+      payload: challenge.payload,           // эхо challenge payload
+      hash: '',                             // пустой хэш (капча мягкая)
+    };
+
+    // Шаг 3: повторный запрос с solution
+    const r2 = await axios.post(
+      ANTIBOT,
+      { action, challenge, solution },
+      { headers, timeout: 15000, validateStatus: () => true }
+    );
+    console.log(`[antibot] step2 HTTP ${r2.status} | ${JSON.stringify(r2.data).substring(0,120)}`);
+
+    if (r2.status === 200 && r2.data?.secureToken) {
+      console.log('[antibot] ✅ secureToken получен');
+      return r2.data.secureToken;
+    }
+    console.warn('[antibot] secureToken не получен');
+    return null;
+  } catch (e) {
+    console.warn('[antibot] ошибка:', e.message);
     return null;
   }
 }
