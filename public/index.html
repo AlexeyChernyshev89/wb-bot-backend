@@ -415,7 +415,7 @@
       <span class="menu-chevron">›</span>
     </button>
     <button class="menu-item" onclick="go('updateToken')">
-      <span class="menu-icon">🔑</span> Обновить токен WB
+      <span class="menu-icon">📲</span> Вход через SMS
       <span class="menu-chevron">›</span>
     </button>
   </div>
@@ -626,59 +626,16 @@
 <div id="screenUpdateToken" class="screen">
   <div class="screen-header">
     <button class="back-btn" onclick="go('main')">‹</button>
-    <span class="screen-title">Обновить токен WB</span>
+    <span class="screen-title">Вход через SMS</span>
   </div>
-
-  <div style="background:var(--surf);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px">
-    <div style="font-size:13px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px">
-      Как создать токен с нужными правами
-    </div>
-    <div class="step-item"><div class="step-num">1</div><span>Откройте <b style="color:var(--text)">seller.wildberries.ru</b></span></div>
-    <div class="step-item"><div class="step-num">2</div><span>Профиль → Настройки → <b style="color:var(--text)">Доступ к API</b></span></div>
-    <div class="step-item"><div class="step-num">3</div><span>Нажмите <b style="color:var(--text)">«Создать новый токен»</b></span></div>
-    <div class="step-item"><div class="step-num">4</div>
-      <span>Тип токена: <b style="color:var(--text)">«Для интеграции вручную» → Персональный</b><br>
-        Категории:<br>
-        <b style="color:var(--accent)">✓ Аналитика (Analytics)</b> — остатки FBO на складах WB<br>
-        <b style="color:var(--accent)">✓ Маркетплейс (Marketplace)</b> — склады<br>
-        <b style="color:var(--accent)">✓ Контент (Content)</b> — поиск товаров
-      </span>
-    </div>
-    <div class="step-item"><div class="step-num">5</div><span>Скопируйте токен и вставьте ниже</span></div>
-  </div>
-
-  <div class="info-banner" style="margin-bottom:14px">
-    <span>⚠️</span>
-    <span>Для остатков на складах WB (FBO) нужен <b>Персональный токен</b> с категорией <b>Аналитика</b>. Базовый токен с этим API не работает.</span>
-  </div>
-
-  <label class="field-label">Новый API-токен Wildberries</label>
-  <div style="position:relative;margin-bottom:4px">
-    <input type="password" id="newTokenInput" class="inp"
-      placeholder="eyJhbGciOiJFUzI1NiIsInR5cCI6Ikp..."
-      autocomplete="off" spellcheck="false"
-      style="padding-right:44px" />
-    <button onclick="toggleTokenVisible()" id="eyeBtn"
-      style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:0">
-      👁
-    </button>
-  </div>
-  <div style="font-size:11px;color:var(--text2);margin-bottom:14px;padding-left:2px">
-    Токен начинается с <span style="color:var(--accent);font-family:monospace">eyJ...</span> · Персональный токен ~700 символов
-  </div>
-
-  <div id="updateTokenMsg" class="msg"></div>
-  <button class="btn btn-accent" id="updateTokenBtn" onclick="updateToken()">
-    Сохранить и проверить токен
-  </button>
 
   <!-- ── SMS-авторизация в ЛК WB (для автоброна) ── -->
-  <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">
+  <div style="margin-top:4px">
     <div style="font-size:16px;font-weight:800;margin-bottom:6px">🤖 Автобронь (вход через SMS)</div>
     <div class="info-banner" style="margin-bottom:14px">
       <span>ℹ️</span>
       <span>Введите номер телефона от аккаунта продавца WB.<br>
-      Бот получит доступ к ЛК и будет автоматически бронировать квоты.</span>
+      Бот получит доступ к ЛК и будет автоматически бронировать квоты. Отдельный API-токен не нужен — достаточно одной SMS-авторизации.</span>
     </div>
 
     <div id="sessionStatus" style="font-size:12px;margin-bottom:12px"></div>
