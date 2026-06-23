@@ -730,7 +730,7 @@ const H = { 'Content-Type':'application/json', 'Authorization':'tma '+initData }
 async function api(method, url, body) {
   const res = await fetch(url, { method, headers: H, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || 'Ошибка ' + res.status), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.message || data.error || 'Ошибка ' + res.status), { status: res.status, code: data.error });
   return data;
 }
 
@@ -1393,6 +1393,7 @@ async function submitBatch() {
 
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   let ok = 0, fail = 0;
+  const blocked = [];
   showMsg('batchMsg','warn', `Обрабатываем ${lines.length} строк...`);
 
   for (const line of lines) {
@@ -1404,10 +1405,14 @@ async function submitBatch() {
     try {
       await api('POST', '/transfers/create', { from_warehouse, to_warehouse, sku, amount });
       ok++;
-    } catch { fail++; }
+    } catch (e) {
+      fail++;
+      if (e.code === 'repeat_blocked') blocked.push(`${sku} (${from_warehouse})`);
+    }
   }
 
-  const msg = `✅ Создано: ${ok}${fail ? ` | ❌ Ошибок: ${fail}` : ''}`;
+  let msg = `✅ Создано: ${ok}${fail ? ` | ❌ Ошибок: ${fail}` : ''}`;
+  if (blocked.length) msg += `\n🔒 Заблокировано 72ч: ${blocked.join(', ')}`;
   showMsg('batchMsg', fail ? 'warn' : 'success', msg);
   if (ok > 0) { document.getElementById('batchText').value = ''; setTimeout(() => go('list'), 1500); }
 }

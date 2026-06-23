@@ -412,7 +412,11 @@ async function getWbFboWarehouseNames(token, sessionToken = null, sessionCookies
  */
 async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null) {
   const target = parseInt(nmId);
-  const article = await getArticleByNmId(token, nmId);
+  let article = null;
+  if (token) {
+    try { article = await getArticleByNmId(token, nmId); }
+    catch (e) { console.warn('[stocks] getArticleByNmId failed (нет токена/категории):', e.message); }
+  }
 
   // === Попытка 1: Transfer API (seller-supply) ===
   if (sessionToken) {
@@ -440,6 +444,10 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
   }
 
   // === Попытка 2: FBO через новый Analytics API (или Statistics fallback) ===
+  if (!token) {
+    // Без Analytics-токена FBO-фоллбэк недоступен — возвращаем что есть (обычно transfer_api покрывает).
+    return { article: article || { nmId: target, name: `Артикул ${nmId}`, skus: [] }, warehouses: [], source: 'no_token' };
+  }
   try {
     const allStocks = await getFboStocksRaw(token, [target], sessionToken, sessionCookies);
     const rows = Array.isArray(allStocks) ? allStocks : [];
@@ -929,6 +937,23 @@ async function fetchSupplierId(sessionToken, sessionCookies = null) {
  */
 const ANTIBOT_FINGERPRINT = require('./antibot-fingerprint');
 
+// Ожидаемая версия antibot-скрипта. Если WB сменит версию — наш статичный fingerprint
+// и/или алгоритм могут устареть. Мониторим это в getAntibotToken и оповещаем.
+const EXPECTED_ANTIBOT_SCRIPT = '/statics/fingerprint_v1.0.26.js';
+const EXPECTED_SDK_VERSION     = 'js-front-desktop/3.0.8';
+
+// Колбэк-оповещение об изменении antibot (регистрируется из server.js).
+let _antibotAlertCb = null;
+let _lastAlertedScript = null;   // чтобы не спамить одинаковыми алертами
+function onAntibotChange(cb) { _antibotAlertCb = cb; }
+function _alertAntibotChange(info) {
+  console.warn(`[antibot] ⚠️ ИЗМЕНЕНИЕ ANTIBOT: ${JSON.stringify(info)}`);
+  if (_antibotAlertCb && _lastAlertedScript !== info.scriptPath) {
+    _lastAlertedScript = info.scriptPath;
+    try { _antibotAlertCb(info); } catch (e) { console.warn('[antibot] alert cb error:', e.message); }
+  }
+}
+
 /**
  * Извлекает challenge id из challenge.payload.
  * payload = <мусор>base64(base64(JSON)).<подпись>. JSON содержит {id, ip, timestamp}.
@@ -992,10 +1017,27 @@ async function getAntibotToken(action, sessionCookies = null) {
     }
 
     const challenge = r1.data.challenge;
+
+    // Мониторинг версии antibot-скрипта. Если WB сменил версию — наш fingerprint/алгоритм
+    // может устареть. Оповещаем (но всё равно пробуем — алгоритм XOR обычно переживает смену версии).
+    if (challenge.scriptPath && challenge.scriptPath !== EXPECTED_ANTIBOT_SCRIPT) {
+      _alertAntibotChange({
+        type: 'script_version_changed',
+        scriptPath: challenge.scriptPath,
+        expected: EXPECTED_ANTIBOT_SCRIPT,
+        note: 'WB сменил fingerprint-скрипт. Проверьте, проходит ли капча; при сбоях обновите antibot-fingerprint.js.',
+      });
+    }
+
     // Извлекаем challenge id (ключ XOR)
     const parsed = parseChallenge(challenge.payload);
     if (!parsed || !parsed.id) {
       console.warn('[antibot] не удалось извлечь challenge id');
+      _alertAntibotChange({
+        type: 'challenge_parse_failed',
+        scriptPath: challenge.scriptPath,
+        note: 'Не удалось распарсить challenge — формат payload мог измениться. Нужна проверка алгоритма.',
+      });
       return null;
     }
     console.log(`[antibot] challenge id: ${parsed.id}`);
@@ -1019,7 +1061,14 @@ async function getAntibotToken(action, sessionCookies = null) {
       console.log('[antibot] ✅ secureToken получен');
       return r2.data.secureToken;
     }
+    // step2 не вернул токен — возможно алгоритм/fingerprint устарел (WB сменил проверку).
     console.warn('[antibot] secureToken не получен');
+    _alertAntibotChange({
+      type: 'solution_rejected',
+      status: r2.status,
+      scriptPath: challenge.scriptPath,
+      note: 'WB отверг solution. Вероятно изменился алгоритм fingerprint или его проверка. Нужно обновить antibot-fingerprint.js / алгоритм.',
+    });
     return null;
   } catch (e) {
     console.warn('[antibot] ошибка:', e.message);
@@ -1035,4 +1084,6 @@ module.exports = {
   checkRedistributionOption,
   refreshWbSession,
   fetchSupplierId,
+  getAntibotToken,
+  onAntibotChange,
 };
