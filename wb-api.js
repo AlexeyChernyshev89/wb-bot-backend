@@ -937,6 +937,7 @@ async function getAntibotToken(action, sessionCookies = null) {
     Referer:                   'https://seller.wildberries.ru/',
     'User-Agent':              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
     'X-Wb-Antibot-Sdk-Version':'js-front-desktop/3.0.8',
+    'X-Wb-Antibot-Key':        '6633e2ada32248b7b0de6828bd1eb271',
   };
   if (sessionCookies) headers['Cookie'] = sessionCookies;
 
