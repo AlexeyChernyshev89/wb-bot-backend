@@ -750,19 +750,29 @@ async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOf
     throw e;
   }
 
-  const result = res.data?.result ?? res.data;
-  const hasFile = result && (result.file || result.mime);
-  const isEmpty = result == null
-    || (typeof result === 'object' && Object.keys(result).length === 0)
-    || result === '';
-  if (isEmpty) {
-    const e = new Error('WB вернул пустой ответ на /transfer/order — перемещение НЕ подтверждено.');
-    e.status = 502;
-    e.emptyCreate = true;
+  // Проверяем HTTP-статус: всё кроме 200 — НЕ успех (401/403/5xx и т.д.)
+  if (res.status !== 200) {
+    const e = new Error(`WB вернул HTTP ${res.status} на /transfer/order — перемещение НЕ подтверждено.`);
+    e.status = (res.status === 401 || res.status === 403) ? 401 : 502;
+    e.notConfirmed = true;
+    // 401/403 — сессия истекла, нужна повторная авторизация
+    if (res.status === 401 || res.status === 403) e.sessionExpired = true;
     throw e;
   }
 
-  console.log(`[createWbTransfer] ✅ ${hasFile ? 'получена накладная (file)' : 'успех'}`);
+  const result = res.data?.result ?? null;
+  // ЕДИНСТВЕННЫЙ признак реального успеха — накладная (file) от WB.
+  // WB при создании перемещения ВСЕГДА возвращает result.file (base64 Excel) + result.mime.
+  // Без файла перемещение НЕ создано — не считаем успехом (защита от ложных «выполнена»).
+  const hasFile = !!(result && result.file && result.mime);
+  if (!hasFile) {
+    const e = new Error('WB не вернул накладную (file) — перемещение НЕ подтверждено.');
+    e.status = 502;
+    e.notConfirmed = true;
+    throw e;
+  }
+
+  console.log(`[createWbTransfer] ✅ получена накладная (file, ${String(result.file).length} симв.)`);
   return result;
 }
 

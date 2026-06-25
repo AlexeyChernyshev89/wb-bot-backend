@@ -10,7 +10,7 @@ const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption, refreshWbSession, fetchSupplierId } = require('./wb-api');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption, refreshWbSession, fetchSupplierId, onAntibotChange } = require('./wb-api');
 const axios = require('axios');
 const path = require('path');
 const fs   = require('fs');
@@ -18,6 +18,14 @@ const fs   = require('fs');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+
+// Минимальный интервал между обновлениями сессии одного пользователя (троттл refresh).
+// Authorizev3 имеет короткий exp (~5мин), без троттла /auth/token дёргался бы каждый цикл.
+const REFRESH_MIN_INTERVAL_MS = 4 * 60 * 1000; // 4 минуты
+
+// Telegram id администратора для системных оповещений (изменение antibot и т.п.).
+// Задаётся через переменную окружения ADMIN_CHAT_ID; если не задана — берётся дефолт владельца.
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '285237021';
 
 // ─── Тестовый режим ───────────────────────────────────────────────────────────
 // true  — отключает проверку подписи Telegram, telegramId = 12345 (для отладки из браузера)
@@ -81,6 +89,18 @@ async function initDB() {
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS error_message  TEXT;
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS product_name   TEXT;
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS moved          INTEGER DEFAULT 0;
+
+    -- История успешных перемещений для блокировки повтора той же пары товар→склад в течение 72ч.
+    -- WB не даёт двигать ту же пару (товар + склад-источник) раньше чем через 72 часа.
+    CREATE TABLE IF NOT EXISTS transfer_history (
+      id             SERIAL PRIMARY KEY,
+      user_id        BIGINT NOT NULL,
+      from_warehouse VARCHAR(255) NOT NULL,
+      sku            VARCHAR(100) NOT NULL,
+      moved_at       TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_transfer_history_lookup
+      ON transfer_history (user_id, from_warehouse, sku, moved_at);
 
     CREATE TABLE IF NOT EXISTS payments (
       id           SERIAL PRIMARY KEY,
@@ -237,19 +257,28 @@ async function getUserSessionToken(telegramId) {
 
   // Авто-обновление сессии: если токен скоро истекает — обновляем через /auth/token
   // (без SMS). Это делает SMS-вход одноразовым для пользователя.
+  // ВАЖНО: refresh троттлится по реальному времени (wb_session_updated), чтобы не дёргать
+  // /auth/token каждый цикл (Authorizev3 имеет короткий exp ~5мин). Минимум REFRESH_MIN_INTERVAL_MS между обновлениями.
   if (token && token.startsWith('eyJhbGciOiJSUzI1NiIs')) {
     let needRefresh = false;
-    try {
-      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
-      // iat есть, exp может не быть — обновляем если прошло > 2 часов с выпуска
-      const ageSec = Math.floor(Date.now() / 1000) - (payload.iat || 0);
-      if (payload.exp) {
-        // обновляем за 5 мин до истечения
-        needRefresh = (payload.exp - Math.floor(Date.now() / 1000)) < 300;
-      } else {
-        needRefresh = ageSec > 2 * 3600;
-      }
-    } catch { needRefresh = false; }
+
+    // Троттл: не обновляем чаще чем раз в REFRESH_MIN_INTERVAL_MS
+    const lastUpdated = row?.wb_session_updated ? new Date(row.wb_session_updated).getTime() : 0;
+    const sinceLast = Date.now() - lastUpdated;
+    const throttled = sinceLast < REFRESH_MIN_INTERVAL_MS;
+
+    if (!throttled) {
+      try {
+        const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+        const ageSec = Math.floor(Date.now() / 1000) - (payload.iat || 0);
+        if (payload.exp) {
+          // обновляем за 5 мин до истечения
+          needRefresh = (payload.exp - Math.floor(Date.now() / 1000)) < 300;
+        } else {
+          needRefresh = ageSec > 2 * 3600;
+        }
+      } catch { needRefresh = false; }
+    }
 
     if (needRefresh) {
       console.log(`[session] токен пользователя ${telegramId} устарел — обновляю через /auth/token`);
@@ -545,6 +574,31 @@ app.post('/transfers/create', telegramAuth, requireDB, async (req, res) => {
   }
   if (from_warehouse === to_warehouse) {
     return res.status(400).json({ error: 'Склады отправителя и получателя должны отличаться' });
+  }
+
+  try {
+    // Блокировка повтора в течение 72ч: WB не двигает ту же пару (товар + склад-источник)
+    // раньше чем через 72 часа после успешного перемещения.
+    const blockRes = await db.query(
+      `SELECT moved_at FROM transfer_history
+       WHERE user_id=$1 AND from_warehouse=$2 AND sku=$3
+         AND moved_at > NOW() - INTERVAL '72 hours'
+       ORDER BY moved_at DESC LIMIT 1`,
+      [req.telegramId, from_warehouse, String(sku)]
+    );
+    if (blockRes.rows.length > 0) {
+      const movedAt = new Date(blockRes.rows[0].moved_at);
+      const unlockAt = new Date(movedAt.getTime() + 72 * 60 * 60 * 1000);
+      const hoursLeft = Math.ceil((unlockAt - Date.now()) / (60 * 60 * 1000));
+      const unlockStr = unlockAt.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return res.status(409).json({
+        error: 'repeat_blocked',
+        message: `Повторное перемещение этого товара с этого склада заблокировано. Wildberries разрешает повтор только через 72 часа. Осталось ~${hoursLeft} ч (можно будет ${unlockStr} МСК).`,
+      });
+    }
+  } catch (e) {
+    console.warn('[create] не удалось проверить 72ч-блокировку:', e.message);
+    // не блокируем создание при ошибке проверки
   }
 
   try {
@@ -1305,12 +1359,14 @@ app.get('/transfers/article-stocks/:nmId', telegramAuth, requireDB, async (req, 
   const { nmId } = req.params;
   if (!/^\d+$/.test(nmId)) return res.status(400).json({ error: 'Некорректный артикул' });
   try {
+    // wb_token (Analytics) теперь НЕ обязателен — остатки берём через session (transfer/list).
+    // Токен используется лишь как доп. источник имени артикула / FBO-фоллбэка.
     const token = await getUserToken(req.telegramId);
-    if (!token) return res.status(401).json({ error: 'Сначала подключите WB API-токен' });
     const { token: sessionToken, cookies: sessionCookies } = await getUserSessionToken(req.telegramId);
+    if (!sessionToken) return res.status(401).json({ error: 'Сначала авторизуйтесь через SMS' });
     const { article, warehouses, source } = await getArticleStocks(token, nmId, sessionToken, sessionCookies);
-    if (!article) return res.status(404).json({
-      error: 'Артикул не найден. Убедитесь что токен имеет категории Content и Статистика.'
+    if (!article && (!warehouses || warehouses.length === 0)) return res.status(404).json({
+      error: 'Артикул не найден или нет остатков на складах.'
     });
     console.log(`[article-stocks] nmId=${nmId} source=${source} warehouses=${warehouses.length}`);
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -1561,7 +1617,8 @@ async function transferWorker() {
   workerRunning = true;
 
   try {
-    // Берём pending-заявки с токенами пользователей
+    // Берём pending-заявки. Требуется только живая сессия (SMS), wb_token НЕ обязателен —
+    // перемещение работает на session-токене + supplier id (как у конкурента, только SMS).
     const { rows } = await db.query(`
       SELECT tr.id, tr.user_id, tr.from_warehouse, tr.to_warehouse,
              tr.sku, tr.amount, tr.retry_count, tr.moved, tr.product_name,
@@ -1569,7 +1626,7 @@ async function transferWorker() {
       FROM   transfer_requests tr
       JOIN   users u ON u.telegram_id = tr.user_id
       WHERE  tr.status = 'pending'
-        AND  u.wb_token IS NOT NULL
+        AND  u.wb_session_token IS NOT NULL
         AND  (tr.next_retry_at IS NULL OR tr.next_retry_at <= NOW())
       ORDER BY tr.created_at ASC
       LIMIT  100
@@ -1628,6 +1685,18 @@ async function processRequest(req) {
     }
 
     const wasMoved = result.wasMoved;
+
+    // Записываем успешное перемещение в историю (для 72ч-блокировки повтора).
+    // Пара (пользователь + склад-источник + товар) теперь заблокирована на 72 часа.
+    try {
+      await db.query(
+        `INSERT INTO transfer_history (user_id, from_warehouse, sku, moved_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [req.user_id, req.from_warehouse, String(req.sku)]
+      );
+    } catch (e) {
+      console.warn('[worker] не удалось записать в transfer_history:', e.message);
+    }
 
     if (wasMoved >= total) {
       // ✅ Полностью перемещено
@@ -1746,8 +1815,9 @@ async function executeRedistribution(wbToken, req) {
     console.log(`[worker] transfer/list: ${chrts.length} складов с остатком для nmId=${req.sku}`);
   } catch (err) {
     if (err.sessionExpired) {
-      const e = new Error('Сессионный токен истёк. Авторизуйтесь снова через SMS в Mini App.');
-      e.status = 400;
+      // Сессия истекла — это ВРЕМЕННО (авто-refresh обновит её). Повторяем, не помечаем failed.
+      const e = new Error('Сессия обновляется, повтор. Если повторяется долго — авторизуйтесь через SMS.');
+      e.status = 409;
       throw e;
     }
     throw err;
@@ -1791,8 +1861,8 @@ async function executeRedistribution(wbToken, req) {
     console.log(`[worker] AvailableLimits: ${quotas.length} складов с квотами`);
   } catch (err) {
     if (err.sessionExpired) {
-      const e = new Error('Сессионный токен истёк. Авторизуйтесь снова через SMS в Mini App.');
-      e.status = 400;
+      const e = new Error('Сессия обновляется, повтор. Если повторяется долго — авторизуйтесь через SMS.');
+      e.status = 409;
       throw e;
     }
     throw err;
@@ -1866,7 +1936,16 @@ async function executeRedistribution(wbToken, req) {
     toOfficeId:   dstOfficeId,
     amount:       moveNow,
   }, sessionCookies);
-  console.log(`[worker] ✅ перемещено ${moveNow} ед:`, JSON.stringify(createResult).substring(0, 150));
+
+  // Двойная защита от ложного успеха: засчитываем перемещение ТОЛЬКО при наличии накладной.
+  // createWbTransfer уже бросает исключение без file, но проверяем ещё раз здесь.
+  if (!createResult || !createResult.file) {
+    const e = new Error('Перемещение не подтверждено WB (нет накладной).');
+    e.status = 502;
+    e.notConfirmed = true;
+    throw e;
+  }
+  console.log(`[worker] ✅ перемещено ${moveNow} ед (накладная получена)`);
 
   // Возвращаем сколько переместили — обработчик решит done или продолжать частями
   return { moved: moveNow, total: Number(req.amount), wasMoved: alreadyMoved + moveNow };
@@ -1894,6 +1973,37 @@ async function notifyUser(telegramId, text, req) {
     console.error('[notify] Ошибка отправки уведомления:', e.message);
   }
 }
+
+/**
+ * Системное оповещение администратора (например, об изменении antibot WB).
+ */
+async function notifyAdmin(text) {
+  if (!BOT_TOKEN || !ADMIN_CHAT_ID) return;
+  try {
+    await axios.post(
+      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+      { chat_id: ADMIN_CHAT_ID, text },
+      { timeout: 8000 }
+    );
+  } catch (e) {
+    console.error('[notify-admin] Ошибка:', e.message);
+  }
+}
+
+// Регистрируем оповещение об изменении antibot WB.
+// Срабатывает при смене версии скрипта, провале парсинга challenge или отклонении solution.
+onAntibotChange((info) => {
+  const lines = [
+    '⚠️ ВНИМАНИЕ: изменился antibot Wildberries',
+    `Тип: ${info.type}`,
+    info.scriptPath ? `Скрипт: ${info.scriptPath}` : null,
+    info.expected ? `Ожидался: ${info.expected}` : null,
+    info.status ? `HTTP: ${info.status}` : null,
+    info.note ? `\n${info.note}` : null,
+    '\nДействие: проверить прохождение капчи. При сбоях обновить antibot-fingerprint.js (снять свежий solution из DevTools и пересобрать эталон).',
+  ].filter(Boolean);
+  notifyAdmin(lines.join('\n'));
+});
 
 // ─── Запуск воркера ───────────────────────────────────────────────────────────
 function startWorker() {
