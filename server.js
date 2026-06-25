@@ -1704,7 +1704,7 @@ async function processRequest(req) {
         `UPDATE transfer_requests SET status='done', moved=\$2, error_message=NULL, updated_at=NOW() WHERE id=\$1`,
         [req.id, total]
       );
-      await notifyUser(req.user_id, '✅ Заявка выполнена', req);
+      await notifyUser(req.user_id, '‼️ Заявка на перемещение выполнена ‼️', req);
       console.log(`[worker] ✅ #${req.id} выполнена полностью (${total} ед)`);
     } else {
       // ⏳ Частично перемещено — сохраняем прогресс, продолжаем ловить квоту
@@ -1957,16 +1957,18 @@ async function executeRedistribution(wbToken, req) {
 async function notifyUser(telegramId, text, req) {
   if (!BOT_TOKEN) return;
   try {
-    let articleLine = `✅ Артикул: ${req.sku}`;
-    if (req.product_name) {
-      articleLine += ` (${req.product_name})`;
+    // Заголовок берём из переданного text (✅ выполнена / ❌ ошибка / ⏳ частично).
+    // РАНЕЕ был баг: функция всегда писала «выполнена», игнорируя text → ложные уведомления.
+    const header = text || 'Обновление по заявке';
+    let body = '';
+    if (req) {
+      let articleLine = `Артикул: ${req.sku}`;
+      if (req.product_name) articleLine += ` (${req.product_name})`;
+      body = `\nПоставщик: Текущий аккаунт WB\nСклад: ${req.from_warehouse} ➡️ ${req.to_warehouse}\n${articleLine}\nЕдиниц товара: ${req.amount}`;
     }
-    const detail = req
-      ? `\n✅ Поставщик: Текущий аккаунт WB\n✅ Склад: ${req.from_warehouse} ➡️ ${req.to_warehouse}\n${articleLine}\n✅ Единиц товара: ${req.amount}`
-      : '';
     await axios.post(
       `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-      { chat_id: telegramId, text: `‼️ Заявка на перемещение выполнена ‼️\n${detail}`, parse_mode: 'HTML' },
+      { chat_id: telegramId, text: `${header}${body}` },
       { timeout: 8000 }
     );
   } catch (e) {
