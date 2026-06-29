@@ -1919,7 +1919,18 @@ async function executeRedistribution(wbToken, req) {
   console.log(`[worker] можем переместить сейчас: ${moveNow} (осталось=${remaining}, остаток склада=${srcWh.count}, srcQuota=${srcQuotaValue}, dstQuota=${dstQuota.dstQuota})`);
 
   if (moveNow <= 0) {
-    const e = new Error(`Нет доступной квоты для перемещения прямо сейчас. Ждём.`);
+    // Уточняем, ЧТО именно ограничивает — чтобы сообщение не путало источник и назначение.
+    let reason;
+    if (dstQuota.dstQuota <= 0) {
+      reason = `Склад назначения «${req.to_warehouse}» сейчас не принимает товар (суточный лимит приёмки исчерпан). Ждём открытия.`;
+    } else if (srcQuotaValue <= 0) {
+      reason = `Квота отгрузки со склада «${req.from_warehouse}» пока закрыта. Ждём открытия.`;
+    } else if (srcWh.count <= 0) {
+      reason = `На складе «${req.from_warehouse}» нет остатка для перемещения.`;
+    } else {
+      reason = `Нет доступной квоты для перемещения прямо сейчас. Ждём.`;
+    }
+    const e = new Error(reason);
     e.status = 409;
     throw e;
   }
