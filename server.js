@@ -19,6 +19,10 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
+// URL прокси-ПК, где живёт браузерный пул и откуда уходит /order (тот же IP, что у токена).
+// Это публичный ngrok-адрес прокси-машины. /create-transfer делает токен + /order локально.
+const PROXY_TRANSFER_URL = process.env.PROXY_TRANSFER_URL || (process.env.YANDEX_FN_URL ? process.env.YANDEX_FN_URL.replace(/\/$/, '') + '/create-transfer' : '');
+
 // Минимальный интервал между обновлениями сессии одного пользователя (троттл refresh).
 // Authorizev3 имеет короткий exp (~5мин), без троттла /auth/token дёргался бы каждый цикл.
 const REFRESH_MIN_INTERVAL_MS = 4 * 60 * 1000; // 4 минуты
@@ -1927,15 +1931,63 @@ async function executeRedistribution(wbToken, req) {
     throw e;
   }
 
-  // Шаг 3: Создаём перемещение на moveNow единиц
-  console.log(`[worker] createWbTransfer: nmID=${req.sku} chrtID=${chrtId} src=${srcOfficeId} dst=${dstOfficeId} count=${moveNow}`);
-  const createResult = await createWbTransfer(sessionToken, {
-    nmId:         Number(req.sku),
-    chrtId:       chrtId,
-    fromOfficeId: srcOfficeId,
-    toOfficeId:   dstOfficeId,
-    amount:       moveNow,
-  }, sessionCookies);
+  // Шаг 3: Создаём перемещение на moveNow единиц.
+  // /order шлётся НА ПРОКСИ-ПК (через /create-transfer): там и antibot-токен,
+  // и сам заказ уходят с одного IP. Railway только готовит параметры.
+  console.log(`[worker] create-transfer: nmID=${req.sku} chrtID=${chrtId} src=${srcOfficeId} dst=${dstOfficeId} count=${moveNow}`);
+
+  let createResult;
+  if (PROXY_TRANSFER_URL) {
+    console.log(`[worker] → используем прокси-ПК: ${PROXY_TRANSFER_URL}`);
+    const transfers = [{
+      nmID: Number(req.sku),
+      srcOfficeID: Number(srcOfficeId),
+      items: [{ dstOfficeID: Number(dstOfficeId), chrtID: Number(chrtId), count: Number(moveNow) }],
+    }];
+    let resp;
+    try {
+      resp = await axios.post(PROXY_TRANSFER_URL, {
+        sessionToken, sessionCookies, supplierId, transfers,
+      }, {
+        timeout: 45000,
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+        validateStatus: () => true,
+      });
+    } catch (err) {
+      const e = new Error(`Прокси-ПК недоступен: ${err.message}`);
+      e.status = 409;  // повторяем — машина пула может быть временно офлайн
+      throw e;
+    }
+    if (resp.status === 503) {
+      // пул не смог сгенерить токен (разлогин / WB сменил antibot) — повторяем
+      const e = new Error(`Пул не сгенерил antibot-токен: ${JSON.stringify(resp.data).slice(0,150)}`);
+      e.status = 409;
+      e.captchaRequired = true;
+      throw e;
+    }
+    const orderHttp = resp.data && resp.data.status;
+    const orderData = resp.data && resp.data.data;
+    // Успех ТОЛЬКО при HTTP 200 + накладная (file). Иначе — не подтверждено.
+    if (orderHttp !== 200 || !orderData || !orderData.result || !orderData.result.file) {
+      const rpcErr = orderData && orderData.error;
+      const e = new Error(rpcErr ? (rpcErr.message || `WB error ${rpcErr.code}`) : `Перемещение не подтверждено (HTTP ${orderHttp})`);
+      e.wbDetail = rpcErr && rpcErr.message;
+      e.notConfirmed = true;
+      // капча/сессия — повторяем; иначе считаем ошибкой
+      if (rpcErr && (rpcErr.code === -32002 || /капч|captcha/i.test(rpcErr.message || ''))) { e.status = 409; e.captchaRequired = true; }
+      else if (orderHttp === 401 || orderHttp === 403) { e.status = 401; e.sessionExpired = true; }
+      else { e.status = 502; }
+      throw e;
+    }
+    createResult = orderData.result;  // { file, mime }
+  } else {
+    // Фолбэк (если прокси-URL не задан): прямой вызов. /order уйдёт с Railway —
+    // сработает только если WB не сверяет IP. Логируем предупреждение.
+    console.warn('[worker] PROXY_TRANSFER_URL не задан — /order уходит с Railway (риск IP-несоответствия)');
+    createResult = await createWbTransfer(sessionToken, {
+      nmId: Number(req.sku), chrtId, fromOfficeId: srcOfficeId, toOfficeId: dstOfficeId, amount: moveNow,
+    }, sessionCookies);
+  }
 
   // Двойная защита от ложного успеха: засчитываем перемещение ТОЛЬКО при наличии накладной.
   // createWbTransfer уже бросает исключение без file, но проверяем ещё раз здесь.
