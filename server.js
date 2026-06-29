@@ -1939,6 +1939,13 @@ async function executeRedistribution(wbToken, req) {
   let createResult;
   if (PROXY_TRANSFER_URL) {
     console.log(`[worker] → используем прокси-ПК: ${PROXY_TRANSFER_URL}`);
+    // supplier id живёт внутри кук (x-supplier-id=...). Достаём его оттуда;
+    // /create-transfer на прокси тоже умеет извлекать из кук, передаём для надёжности.
+    let supplierId = null;
+    if (sessionCookies) {
+      const m = sessionCookies.match(/x-supplier-id=([0-9a-f-]{36})/i);
+      if (m) supplierId = m[1];
+    }
     const transfers = [{
       nmID: Number(req.sku),
       srcOfficeID: Number(srcOfficeId),
