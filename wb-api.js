@@ -689,10 +689,14 @@ async function createWbTransfer(sessionToken, { nmId, chrtId, fromOfficeId, toOf
     ],
   }];
 
-  // Шаг 1: получаем antibot captcha-токен ПРОГРАММНО (без браузера)
-  const captchaToken = await getAntibotToken('TRANSFER_REMAINS_ORDER', sessionCookies);
+  // Шаг 1: получаем antibot captcha-токен ИЗ БРАУЗЕРНОГО ПУЛА (proxy-ПК).
+  // Программный getAntibotToken устарел (WB ввёл поведенческую + pow проверку и
+  // отвечает 403). Пул решает цепочку challenge'ей собственными скриптами WB в
+  // реальном Chrome. Токен привязан к IP пула, поэтому /order ниже ДОЛЖЕН уходить
+  // с той же машины (см. ANTIBOT_POOL_URL — это адрес прокси-ПК).
+  const captchaToken = await getAntibotTokenFromPool();
   if (!captchaToken) {
-    const e = new Error('Не удалось получить antibot captcha-токен');
+    const e = new Error('Не удалось получить antibot captcha-токен из пула');
     e.status = 409;          // повторяем
     e.captchaRequired = true;
     throw e;
@@ -946,6 +950,39 @@ async function fetchSupplierId(sessionToken, sessionCookies = null) {
  * Возвращает secureToken для заголовка X-Wb-Captcha-Token, или null.
  */
 const ANTIBOT_FINGERPRINT = require('./antibot-fingerprint');
+
+// Адрес браузерного пула (на proxy-ПК), который генерит antibot secureToken.
+// /order должен уходить с той же машины, что и пул (токен привязан к IP).
+// Поэтому createWbTransfer выполняется НА ПРОКСИ-ПК, а ANTIBOT_POOL_URL = localhost там.
+const ANTIBOT_POOL_URL = process.env.ANTIBOT_POOL_URL || 'http://localhost:3002/gen-antibot-token';
+
+/**
+ * Получает свежий secureToken из браузерного пула (рабочий путь).
+ * Пул решает цепочку challenge'ей собственными скриптами WB в реальном Chrome.
+ */
+async function getAntibotTokenFromPool() {
+  try {
+    const res = await axios.post(ANTIBOT_POOL_URL, {}, { timeout: 30000, validateStatus: () => true });
+    if (res.status === 200 && res.data && res.data.token) {
+      console.log('[antibot-pool] ✅ токен получен из пула');
+      return res.data.token;
+    }
+    console.warn(`[antibot-pool] ⚠️ пул вернул HTTP ${res.status}:`, JSON.stringify(res.data).slice(0, 150));
+    // оповещаем мониторинг — возможно пул разлогинился или WB снова сменил antibot
+    _alertAntibotChange({ type: 'pool_failed', status: res.status, detail: res.data });
+    return null;
+  } catch (e) {
+    console.error('[antibot-pool] ❌ ошибка обращения к пулу:', e.message);
+    _alertAntibotChange({ type: 'pool_unreachable', error: e.message });
+    return null;
+  }
+}
+
+/**
+ * УСТАРЕЛО (оставлено для справки): программный antibot БЕЗ браузера.
+ * Перестал работать после 23-24 июня 2026 — WB ввёл pow + поведенческую проверку,
+ * отвечает 403 на любой не-браузерный запрос. Заменён на getAntibotTokenFromPool().
+ */
 
 // Ожидаемая версия antibot-скрипта. Если WB сменит версию — наш статичный fingerprint
 // и/или алгоритм могут устареть. Мониторим это в getAntibotToken и оповещаем.
