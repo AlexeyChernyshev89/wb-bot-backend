@@ -1356,6 +1356,35 @@ app.get('/transfers/wb-warehouses', telegramAuth, requireDB, async (req, res) =>
 });
 
 /**
+ * GET /transfers/articles
+ * Список всех артикулов продавца с наименованиями — для выпадающего списка
+ * при создании заявки. Возвращает [{ nmID, name }].
+ */
+app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
+  try {
+    const token = await getUserToken(req.telegramId);
+    const { token: sessionToken } = await getUserSessionToken(req.telegramId);
+    if (!sessionToken && !token) return res.status(401).json({ error: 'Сначала авторизуйтесь через SMS' });
+
+    const cards = await getAllCards(token || sessionToken);
+    // Карточки → [{nmID, name}], отсортированные по имени
+    const items = (cards || [])
+      .map(c => ({
+        nmID: c.nmID || c.nmId,
+        name: (c.title || c.subjectName || c.vendorCode || '').toString().trim(),
+      }))
+      .filter(x => x.nmID)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+
+    res.set('Cache-Control', 'no-store');
+    res.json({ articles: items, count: items.length });
+  } catch (err) {
+    console.error('[articles] ошибка:', err.message);
+    res.status(500).json({ error: 'Не удалось получить список артикулов' });
+  }
+});
+
+/**
  * GET /transfers/article-stocks/:nmId
  * Поиск товара по артикулу WB + остатки по складам
  */

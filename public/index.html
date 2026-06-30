@@ -475,9 +475,11 @@
       <div class="field-group">
         <div class="search-field" id="sfArticle">
           <span class="ico">🔍</span>
-          <input id="articleInput" placeholder="Введите артикул WB..."
-            inputmode="numeric" oninput="onArticleInput()" />
+          <input id="articleInput" placeholder="Введите или выберите артикул..."
+            inputmode="numeric" oninput="onArticleInput()" onfocus="onArticleFocus()" autocomplete="off" />
+          <button class="chevron" onclick="toggleArticleList(event)">⌄</button>
         </div>
+        <div class="dropdown" id="dropArticles" style="display:none;max-height:260px;overflow-y:auto"></div>
         <div id="articleStatus" style="font-size:12px;color:var(--text2);margin-top:6px;padding-left:4px"></div>
       </div>
     </div>
@@ -1210,10 +1212,80 @@ function onArticleInput() {
     document.getElementById(s)?.classList.remove('on'));
   delete _state.card; delete _state.from; delete _state.to;
 
-  if (!/^\d{5,}$/.test(val)) return;
+  if (!/^\d{5,}$/.test(val)) {
+    // не похоже на полный артикул — показываем отфильтрованный список
+    renderArticleList(val);
+    return;
+  }
   document.getElementById('articleStatus').textContent = '⏳ Поиск...';
+  hideArticleList();
   _articleTimer = setTimeout(() => searchArticle(val), 600);
 }
+
+// --- Выпадающий список всех артикулов продавца ---
+let _allArticles = null;       // кэш [{nmID, name}]
+let _articlesLoading = false;
+
+async function loadArticles() {
+  if (_allArticles || _articlesLoading) return;
+  _articlesLoading = true;
+  try {
+    const res = await api('GET', '/transfers/articles');
+    _allArticles = (res.articles || []);
+  } catch (e) {
+    _allArticles = [];
+  } finally {
+    _articlesLoading = false;
+  }
+}
+
+function hideArticleList() {
+  const d = document.getElementById('dropArticles');
+  if (d) d.style.display = 'none';
+}
+
+async function onArticleFocus() {
+  if (_optionBlocked) return;
+  await loadArticles();
+  renderArticleList(document.getElementById('articleInput').value.trim());
+}
+
+async function toggleArticleList(ev) {
+  ev.stopPropagation();
+  if (_optionBlocked) return;
+  const d = document.getElementById('dropArticles');
+  if (d.style.display === 'block') { hideArticleList(); return; }
+  await loadArticles();
+  renderArticleList(document.getElementById('articleInput').value.trim());
+}
+
+function renderArticleList(filter) {
+  const d = document.getElementById('dropArticles');
+  if (!d || !_allArticles) return;
+  const f = (filter || '').toLowerCase();
+  const items = _allArticles.filter(a =>
+    !f || String(a.nmID).includes(f) || (a.name || '').toLowerCase().includes(f)
+  ).slice(0, 100);
+  if (!items.length) { d.innerHTML = '<div class="dropdown-item" style="color:var(--text2)">Ничего не найдено</div>'; d.style.display = 'block'; return; }
+  d.innerHTML = items.map(a =>
+    `<div class="dropdown-item" onclick="pickArticle(${a.nmID})">(${a.nmID}) ${escHtml(a.name || '')}</div>`
+  ).join('');
+  d.style.display = 'block';
+}
+
+function pickArticle(nmId) {
+  document.getElementById('articleInput').value = String(nmId);
+  hideArticleList();
+  document.getElementById('articleStatus').textContent = '⏳ Поиск...';
+  searchArticle(String(nmId));
+}
+
+// закрывать список при клике вне поля
+document.addEventListener('click', (e) => {
+  const sf = document.getElementById('sfArticle');
+  const d = document.getElementById('dropArticles');
+  if (d && sf && !sf.contains(e.target) && !d.contains(e.target)) hideArticleList();
+});
 
 async function searchArticle(nmId) {
   try {
