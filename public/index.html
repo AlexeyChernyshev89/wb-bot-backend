@@ -1148,15 +1148,23 @@ async function checkRedistributionOption() {
   try {
     const r = await api('GET', '/transfers/check-option');
     const banner = document.getElementById('optionWarning');
-    // Блокируем ТОЛЬКО при явном false (опция точно выключена).
-    // При null (не смогли проверить) — не мешаем, чтобы не блокировать ложно.
+    // Сессия не работает (нет кук/supplier_id) — нужна повторная SMS-авторизация.
+    if (r.status === 'no_session') {
+      _optionBlocked = true;
+      if (banner) {
+        banner.style.display = 'block';
+        banner.innerHTML = '⚠️ Сессия WB не активна. Войдите заново через <b>SMS</b> (меню → «Вход через SMS»). Это нужно, чтобы бот получил доступ к вашим складам и опции перемещения.';
+      }
+      document.getElementById('stepArticle')?.classList.remove('on');
+      return;
+    }
+    // Опция точно выключена.
     if (r.active === false) {
       _optionBlocked = true;
       if (banner) {
         banner.style.display = 'block';
         banner.innerHTML = '⚠️ Опция <b>«Перераспределение остатков между складами»</b> не подключена в вашем ЛК WB. Без неё перемещения невозможны. Подключите её в разделе «Тарифы» → Конструктор тарифов, затем вернитесь.';
       }
-      // Блокируем шаг ввода артикула
       document.getElementById('stepArticle')?.classList.remove('on');
     } else {
       _optionBlocked = false;

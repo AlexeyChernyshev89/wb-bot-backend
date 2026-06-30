@@ -819,6 +819,13 @@ async function checkRedistributionOption(sessionToken, sessionCookies = null) {
     const bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
     console.log(`[redistribution-option] HTTP ${res.status} | body: ${bodyStr.substring(0, 200)}`);
 
+    // 401/403 = сессия не работает (нет supplier_id/кук), а НЕ «опция не подключена».
+    // Возвращаем явный no_session, чтобы фронт показал «нужна повторная SMS-авторизация».
+    if (res.status === 401 || res.status === 403) {
+      console.warn(`[redistribution-option] HTTP ${res.status} — сессия не работает (нет кук/supplier_id)`);
+      return { active: false, status: 'no_session', error: 'Сессия не активна — нужна повторная авторизация через SMS' };
+    }
+
     const options = res.data?.result?.options || res.data?.options || [];
     const opt = options.find(o => o.publicSlug === 'redistributionSellerGoodsOneWarehouse');
     if (!opt) {
