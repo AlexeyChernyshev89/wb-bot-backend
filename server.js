@@ -1357,24 +1357,69 @@ app.get('/transfers/wb-warehouses', telegramAuth, requireDB, async (req, res) =>
 
 /**
  * GET /transfers/articles
- * Список всех артикулов продавца с наименованиями — для выпадающего списка
- * при создании заявки. Возвращает [{ nmID, name }].
+ * Список артикулов продавца с наименованиями для выпадающего списка.
+ * Работает через SMS-сессию (seller-supply/transfer/list с пустым nmIDs).
+ * Возвращает [{ nmID, name }].
  */
 app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
   try {
-    const token = await getUserToken(req.telegramId);
-    const { token: sessionToken } = await getUserSessionToken(req.telegramId);
-    if (!sessionToken && !token) return res.status(401).json({ error: 'Сначала авторизуйтесь через SMS' });
+    const { token: sessionToken, cookies: sessionCookies } = await getUserSessionToken(req.telegramId);
+    const wbToken = await getUserToken(req.telegramId);
+    if (!sessionToken && !wbToken) return res.status(401).json({ error: 'Сначала авторизуйтесь через SMS' });
 
-    const cards = await getAllCards(token || sessionToken);
-    // Карточки → [{nmID, name}], отсортированные по имени
-    const items = (cards || [])
-      .map(c => ({
-        nmID: c.nmID || c.nmId,
-        name: (c.title || c.subjectName || c.vendorCode || '').toString().trim(),
-      }))
-      .filter(x => x.nmID)
-      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+    let items = [];
+
+    // ОСНОВНОЙ путь: seller-supply/transfer/list БЕЗ nmIDs — вернёт активные товары
+    // (те, что имеют FBO-остатки на складах — а именно они и нужны для перемещений).
+    // Работает через SMS-сессию, не требует отдельного WB API-токена.
+    if (sessionToken) {
+      try {
+        const list = await getWbTransferList(sessionToken, null, sessionCookies);
+        const transfers = list?.result?.transfers || list?.transfers || [];
+        // Из /list мы получаем nmID и остатки, но НЕ имя товара. Соберём nmIDs
+        // и запросим у seller-supply имена по chrtID/nmID.
+        const nmIds = [...new Set(transfers.map(t => t.nmID).filter(Boolean))];
+        console.log(`[articles] seller-supply /list вернул ${nmIds.length} артикулов`);
+
+        // Пытаемся дополнить именами через getAllCards (если WB API-токен есть)
+        let nameMap = {};
+        if (wbToken) {
+          try {
+            const cards = await getAllCards(wbToken);
+            for (const c of (cards || [])) {
+              const id = c.nmID || c.nmId;
+              const nm = (c.title || c.subjectName || c.vendorCode || '').toString().trim();
+              if (id && nm) nameMap[id] = nm;
+            }
+          } catch (e) { console.warn('[articles] getAllCards fail (не критично):', e.message); }
+        }
+        items = nmIds.map(id => ({ nmID: id, name: nameMap[id] || `Артикул ${id}` }));
+      } catch (e) {
+        console.warn('[articles] seller-supply path failed:', e.message);
+      }
+    }
+
+    // ФОЛБЭК: если seller-supply не дал ничего, а WB-токен есть — возьмём карточки
+    if (!items.length && wbToken) {
+      try {
+        const cards = await getAllCards(wbToken);
+        items = (cards || [])
+          .map(c => ({
+            nmID: c.nmID || c.nmId,
+            name: (c.title || c.subjectName || c.vendorCode || '').toString().trim(),
+          }))
+          .filter(x => x.nmID);
+      } catch (e) { console.warn('[articles] getAllCards fallback fail:', e.message); }
+    }
+
+    if (!items.length) {
+      return res.status(404).json({ articles: [], count: 0, error: 'Список артикулов пуст. Проверьте, что у товаров есть FBO-остатки, или войдите заново через SMS.' });
+    }
+
+    // сортируем по имени, дедуп на всякий случай
+    const seen = new Set();
+    items = items.filter(x => !seen.has(x.nmID) && seen.add(x.nmID));
+    items.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
 
     res.set('Cache-Control', 'no-store');
     res.json({ articles: items, count: items.length });
