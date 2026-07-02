@@ -10,7 +10,7 @@ const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption, refreshWbSession, fetchSupplierId, onAntibotChange } = require('./wb-api');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption, refreshWbSession, fetchSupplierId, onAntibotChange, getWarehouseSupplyTypes } = require('./wb-api');
 const axios = require('axios');
 const path = require('path');
 const fs   = require('fs');
@@ -1316,6 +1316,52 @@ app.get('/transfers/check-option', telegramAuth, requireDB, async (req, res) => 
 });
 
 /**
+ * GET /transfers/warehouse-restrictions?dstWarehouseId=507
+ * Проверяет ограничения склада назначения по типам поставок (с 9 июля 2026).
+ * Монопаллета-only = перемещение недоступно.
+ */
+app.get('/transfers/warehouse-restrictions', telegramAuth, requireDB, async (req, res) => {
+  try {
+    const { dstWarehouseId } = req.query;
+    const token = await getUserToken(req.telegramId);
+
+    // Если API-токена нет — не можем проверить, не блокируем (предупреждаем только при наличии данных)
+    if (!token || !dstWarehouseId) {
+      return res.json({ canTransfer: true, warning: null });
+    }
+
+    const supplyMap = await getWarehouseSupplyTypes(token);
+    const warehouseId = Number(dstWarehouseId);
+    const wh = supplyMap.get(warehouseId);
+
+    if (!wh) {
+      return res.json({ canTransfer: true, warning: null, note: 'Информация о складе не найдена' });
+    }
+
+    if (wh.isMonoPalletOnly) {
+      return res.json({
+        canTransfer: false,
+        warning: `⚠️ Склад «${wh.name}» принимает товар только в монопаллетах. По новым правилам WB (с 9 июля 2026) перемещение туда недоступно. Выберите другой склад или дождитесь изменения ограничений.`,
+        boxTypes: wh.boxTypes,
+      });
+    }
+
+    if (wh.hasMono && wh.hasBox) {
+      return res.json({
+        canTransfer: true,
+        warning: `ℹ️ Склад «${wh.name}» принимает несколько типов поставок (в т.ч. монопаллету). Перемещение доступно, но если временно введут ограничение только на монопаллету — оно станет недоступным.`,
+        boxTypes: wh.boxTypes,
+      });
+    }
+
+    return res.json({ canTransfer: true, warning: null, boxTypes: wh.boxTypes });
+  } catch (err) {
+    console.error('[warehouse-restrictions] error:', err.message);
+    res.json({ canTransfer: true, warning: null, error: err.message });
+  }
+});
+
+/**
  * GET /transfers/wb-warehouses
  * Список складов WB куда можно ОТПРАВИТЬ товар (для поля «Куда отправить»).
  * Источник — AvailableLimits (quotas с dstQuota > 0), как в реальном ЛК WB.
@@ -1505,6 +1551,34 @@ app.post('/payments/create', telegramAuth, (req, res) => {
   });
 });
 
+/**
+ * GET /payments/balance
+ * Возвращает баланс (купленные единицы) и зарезервированные единицы для юзера.
+ */
+app.get('/payments/balance', telegramAuth, requireDB, async (req, res) => {
+  try {
+    // Баланс = сумма всех успешных пополнений
+    const paid = await db.query(
+      `SELECT COALESCE(SUM(units),0) AS total FROM payments
+       WHERE user_id=$1 AND status='succeeded'`,
+      [req.telegramId]
+    );
+    // Зарезервировано = кол-во единиц в активных (pending) заявках
+    const reserved = await db.query(
+      `SELECT COALESCE(SUM(amount),0) AS total FROM transfer_requests
+       WHERE user_id=$1 AND status='pending'`,
+      [req.telegramId]
+    );
+    res.json({
+      balance:  Number(paid.rows[0]?.total  || 0),
+      reserved: Number(reserved.rows[0]?.total || 0),
+    });
+  } catch (err) {
+    console.error('balance error:', err.message);
+    res.json({ balance: 0, reserved: 0 });
+  }
+});
+
 app.get('/payments/history', telegramAuth, requireDB, async (req, res) => {
   try {
     const result = await db.query(
@@ -1601,13 +1675,22 @@ app.post('/webhook', async (req, res) => {
       if (text.startsWith('/start')) {
         await tgApi('sendMessage', {
           chat_id: chatId,
-          text: '👋 Добро пожаловать в *WB Supply Helper*\n\nАвтоматизация перераспределения остатков товаров между складами Wildberries.',
-          parse_mode: 'Markdown',
+          text: '👋 Добро пожаловать в *WB\\_Logistic\\_bot*\n\nАвтоматизация перераспределения остатков товаров между складами Wildberries.\n\nНажмите кнопку ниже, чтобы открыть приложение:',
+          parse_mode: 'MarkdownV2',
           reply_markup: {
-            inline_keyboard: [[{
-              text: '🛒 Открыть приложение',
-              web_app: { url: APP_URL }   // ← тип web_app, не url!
-            }]]
+            inline_keyboard: [
+              [{ text: '🚀 Открыть приложение', web_app: { url: APP_URL } }],
+              [{ text: '💬 Поддержка', url: 'https://t.me/Chernyshevofficial' }]
+            ]
+          }
+        });
+      } else if (text === '/support') {
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: '💬 Служба поддержки WB\\_Logistic\\_bot\n\nПо всем вопросам обращайтесь к @Chernyshevofficial',
+          parse_mode: 'MarkdownV2',
+          reply_markup: {
+            inline_keyboard: [[{ text: '💬 Написать в поддержку', url: 'https://t.me/Chernyshevofficial' }]]
           }
         });
       }
@@ -1667,7 +1750,8 @@ async function setupBot() {
     // 3. Устанавливаем команды бота
     await tgApi('setMyCommands', {
       commands: [
-        { command: 'start', description: 'Открыть WB Supply Helper' }
+        { command: 'start', description: '🚀 Открыть WB_Logistic_bot' },
+        { command: 'support', description: '💬 Поддержка' }
       ]
     });
     console.log('✅ Команды бота зарегистрированы');

@@ -378,6 +378,17 @@
     </div>
   </div>
 
+  <!-- Баннер новых правил WB с 7 июля 2026 -->
+  <div id="wbRulesBanner" style="display:flex;flex-direction:column;gap:8px;background:rgba(255,196,0,.12);border:1px solid #ffc400;border-radius:var(--radius);padding:12px 14px;font-size:12px;color:var(--text);margin-bottom:14px">
+    <div style="font-weight:700;font-size:13px">⚠️ Новые правила WB с 7 июля 2026</div>
+    <div style="color:var(--text2);line-height:1.55">
+      Перемещение возможно только если склад принимает товар в типах: <b>Короб</b> или <b>Поштучная паллета</b>. При типе только <b>Монопаллета</b> — перемещение недоступно. Также влияют временные ограничения складов.
+    </div>
+    <div style="color:var(--text2)">Проверьте: <b>Поставки → FBW → Ограничения складов</b></div>
+    <button onclick="document.getElementById('wbRulesBanner').style.display='none'"
+      style="align-self:flex-end;background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0">Понятно ✕</button>
+  </div>
+
   <div id="tokenBanner" class="info-banner" style="display:none">
     <span>ℹ️</span><span id="tokenBannerText"></span>
   </div>
@@ -966,6 +977,27 @@ function showMain(st) {
 
   // Проверяем сессионный статус
   api('GET', '/auth/session-status').then(function(r) { updateSessionBanner(r.active); }).catch(function() {});
+
+  // Загружаем баланс и зарезервированные единицы
+  loadBalance();
+}
+
+// ═══════════════════════════════════════════════════════
+// БАЛАНС ПЕРЕМЕЩЕНИЙ
+// ═══════════════════════════════════════════════════════
+async function loadBalance() {
+  try {
+    const b = await api('GET', '/payments/balance');
+    const balEl = document.getElementById('balVal');
+    const resEl = document.getElementById('resVal');
+    if (balEl) balEl.textContent = (b.balance || 0).toLocaleString('ru');
+    if (resEl) resEl.textContent = (b.reserved || 0).toLocaleString('ru');
+  } catch {
+    const balEl = document.getElementById('balVal');
+    const resEl = document.getElementById('resVal');
+    if (balEl) balEl.textContent = '0';
+    if (resEl) resEl.textContent = '0';
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1414,6 +1446,8 @@ async function saveRequest() {
     // Очищаем состояние формы чтобы следующая заявка была пустой
     _state = {};
     btn.innerHTML = 'Сохранить'; btn.disabled = false;
+    // Обновляем баланс/резерв на главном экране
+    loadBalance();
     go('list');
   } catch(e) {
     showMsg('createMsg','error', e.message);
@@ -1457,10 +1491,17 @@ async function submitBatch() {
 // ═══════════════════════════════════════════════════════
 // ОПЛАТА
 // ═══════════════════════════════════════════════════════
+// Тарифы: 1 рубль за 1 единицу товара (линейная цена)
 const TARIFFS = [
-  {u:100,   p:400  }, {u:200,  p:700  }, {u:500,   p:1600 },
-  {u:1000,  p:2999 }, {u:2000, p:5999 }, {u:5000,  p:14000},
-  {u:10000, p:25000}, {u:20000,p:39999}, {u:50000, p:49999},
+  {u:100,   p:100  },
+  {u:200,   p:200  },
+  {u:500,   p:500  },
+  {u:1000,  p:1000 },
+  {u:2000,  p:2000 },
+  {u:3000,  p:3000 },
+  {u:5000,  p:5000 },
+  {u:7000,  p:7000 },
+  {u:10000, p:10000},
 ];
 let _tariff = null, _payMethod = 'std';
 

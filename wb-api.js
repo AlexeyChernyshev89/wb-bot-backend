@@ -668,6 +668,44 @@ async function getTransferAvailableLimits(sessionToken, nmId, sessionCookies = n
 }
 
 /**
+ * Получить ограничения складов по типам поставок (с 9 июля 2026 влияют на перемещения).
+ * Монопаллета (monopallete) = перемещение НЕДОСТУПНО по новым правилам WB.
+ * Короб (box) или поштучная паллета (unitedPallete) = перемещение доступно.
+ *
+ * GET /api/v3/warehouses — возвращает склады с типами поставок
+ * или используем /api/v2/warehouses (устаревший, но более доступный)
+ *
+ * Возвращает Map<officeID -> { name, boxType, isMonoPalletOnly }>
+ */
+async function getWarehouseSupplyTypes(wbToken) {
+  if (!wbToken) return new Map();
+  try {
+    const res = await wbApi('GET', '/api/v3/warehouses', null, wbToken);
+    const warehouses = res || [];
+    const result = new Map();
+    for (const wh of warehouses) {
+      const id = wh.ID || wh.id;
+      if (!id) continue;
+      // boxTypeName: 'Короб' | 'Монопаллета' | 'Суперсейф' | 'QR-поставка без коробов'
+      const types = (wh.boxTypes || []).map(b => b.name || b.boxTypeName || '');
+      const hasBox = types.some(t => /короб|поштучн|unitedpal/i.test(t));
+      const hasMono = types.some(t => /монопал|monopal/i.test(t));
+      result.set(id, {
+        name: wh.name || wh.warehouseName || String(id),
+        boxTypes: types,
+        isMonoPalletOnly: hasMono && !hasBox,
+        hasBox,
+        hasMono,
+      });
+    }
+    return result;
+  } catch (e) {
+    console.warn('[supply-types] не удалось получить типы поставок:', e.message);
+    return new Map();
+  }
+}
+
+/**
  * Получить остатки артикула по складам (откуда можно перемещать).
  * POST /transfer/list  с { nmIDs: [nmId] }
  * Ответ: result.transfers[].chrts[] — { warehouseID, warehouseName, count, dstWarehouseIDs[] }
@@ -1150,4 +1188,5 @@ module.exports = {
   fetchSupplierId,
   getAntibotToken,
   onAntibotChange,
+  getWarehouseSupplyTypes,
 };
