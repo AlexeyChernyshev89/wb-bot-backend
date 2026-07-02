@@ -1322,30 +1322,37 @@ app.get('/transfers/check-option', telegramAuth, requireDB, async (req, res) => 
  */
 app.get('/transfers/wb-warehouses', telegramAuth, requireDB, async (req, res) => {
   try {
-    const token = await getUserToken(req.telegramId);
-    if (!token) return res.status(401).json({ error: 'Сначала подключите WB API-токен' });
-
-    // Берём склады из квот — только те что реально принимают товар
+    // Показываем только склады, реально принимающие товар прямо сейчас (dstQuota > 0).
+    // Закрытые не показываем — иначе пользователь выберет заведомо неработающий вариант.
+    // Список меняется в течение дня (WB открывает квоты порциями).
     const { token: sessionToken, cookies: sessionCookies } = await getUserSessionToken(req.telegramId);
     if (sessionToken && sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs')) {
       try {
         const quotas = await getTransferAvailableLimits(sessionToken, null, sessionCookies);
-        // Только склады принимающие товар (dstQuota > 0), исключаем служебные
-        const names = quotas
-          .filter(q => (q.dstQuota || 0) > 0)
-          .map(q => q.displayName || q.officeName)
-          .filter(Boolean)
-          .filter(n => !/остальные|питание/i.test(n))
+        // Схлопываем варианты одного склада (Питание + основной) по имени, берём максимум
+        const byName = {};
+        for (const q of quotas) {
+          const name = q.displayName || q.officeName;
+          if (!name) continue;
+          if (/остальные/i.test(name)) continue;   // служебные скрываем
+          const dst = q.dstQuota || 0;
+          if (!byName[name] || dst > byName[name]) byName[name] = dst;
+        }
+        const open = Object.entries(byName)
+          .filter(([, dst]) => dst > 0)
+          .map(([name]) => name)
           .sort((a, b) => a.localeCompare(b, 'ru'));
-        const unique = [...new Set(names)];
-        console.log(`[wb-warehouses] ${unique.length} складов с dstQuota>0`);
-        return res.json({ warehouses: unique });
+        const closedCount = Object.values(byName).filter(v => v === 0).length;
+        console.log(`[wb-warehouses] ${open.length} открытых для приёмки | ${closedCount} закрытых сейчас`);
+        return res.json({ warehouses: open });
       } catch (e) {
         console.warn('[wb-warehouses] AvailableLimits failed:', e.message);
       }
     }
 
-    // Fallback: старый способ (Analytics остатки), но фильтруем служебные записи
+    // Fallback: старый способ через WB API-токен (Analytics остатки)
+    const token = await getUserToken(req.telegramId);
+    if (!token) return res.status(401).json({ error: 'Сначала войдите через SMS' });
     const names = (await getWbFboWarehouseNames(token))
       .filter(n => !/остальные|питание/i.test(n));
     res.json({ warehouses: names });

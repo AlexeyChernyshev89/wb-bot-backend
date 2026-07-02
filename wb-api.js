@@ -425,16 +425,26 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
       const resp = await getTransferStockByWarehouse(sessionToken, target, sessionCookies);
       const chrts = Array.isArray(resp) ? resp : [];
       if (chrts.length > 0) {
+        // Фильтруем: показываем ТОЛЬКО те склады-источники, с которых WB разрешает
+        // перемещение (dstWarehouseIDs непустой). Иначе в список попадает "мусор":
+        // остатки в обезличке / браке / в пути (Электросталь 1 шт, Махачкала 1 шт
+        // и т.п.), с которых WB на самом деле не даст перемещать.
         const byWarehouse = {};
+        let filteredOutMuted = 0;
         for (const c of chrts) {
+          const dstAllowed = Array.isArray(c.dstWarehouseIDs) && c.dstWarehouseIDs.length > 0;
+          if (!dstAllowed) { filteredOutMuted += (c.count || 0); continue; }
           const name = c.warehouseName || `Склад ${c.warehouseID}`;
           byWarehouse[name] = (byWarehouse[name] || 0) + (c.count || 0);
+        }
+        if (filteredOutMuted > 0) {
+          console.log(`[stocks] nmId=${nmId}: отфильтровано ${filteredOutMuted} ед — склады без разрешения на перемещение`);
         }
         const warehouses = Object.entries(byWarehouse)
           .map(([name, amount]) => ({ name, amount }))
           .filter(w => w.amount > 0)
           .sort((a, b) => b.amount - a.amount);
-        console.log(`[stocks] Transfer API: nmId=${nmId} в ${warehouses.length} складах`);
+        console.log(`[stocks] Transfer API: nmId=${nmId} в ${warehouses.length} складах (разрешённых для перемещения)`);
         return { article: article || { nmId: target, name: `Артикул ${nmId}`, skus: [] }, warehouses, source: 'transfer_api' };
       }
       console.log(`[stocks] Transfer API: nmId=${nmId} нет остатков в transfer/list`);
