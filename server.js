@@ -1577,9 +1577,19 @@ const { randomUUID }    = require('crypto');
 /** Вызов API ЮKassa с Basic-авторизацией */
 async function yookassaApi(method, path, body = null, idempotenceKey = null) {
   const auth = Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET}`).toString('base64');
+
+  // Если задан YOOKASSA_PROXY_URL — запросы к ЮKassa идут через него
+  // (нужно когда Railway блокирует прямые запросы к api.yookassa.ru)
+  const baseUrl = process.env.YOOKASSA_PROXY_URL
+    ? process.env.YOOKASSA_PROXY_URL.replace(/\/$/, '')
+    : 'https://api.yookassa.ru/v2';
+  const url = process.env.YOOKASSA_PROXY_URL
+    ? `${baseUrl}${path}`
+    : `https://api.yookassa.ru/v2${path}`;
+
   const res = await axios({
     method,
-    url: `https://api.yookassa.ru/v2${path}`,
+    url,
     headers: {
       'Authorization': `Basic ${auth}`,
       'Content-Type':  'application/json',
