@@ -1607,13 +1607,12 @@ app.post('/payments/create', telegramAuth, requireDB, async (req, res) => {
   if (!amount || amount < 1)      return res.status(400).json({ error: 'Укажите сумму' });
 
   try {
-    const idempKey = randomUUID(); // храним для идемпотентности
-    // Создаём платёж в ЮKassa
+    const idempKey = randomUUID();
     const payment = await yookassaApi('POST', '/payments', {
       amount: { value: Number(amount).toFixed(2), currency: 'RUB' },
       confirmation: {
         type: 'redirect',
-        return_url: `${APP_URL}?payment=success`,
+        return_url: `${APP_URL}/?payment=success`,
       },
       capture: true,
       description: `WB_Logistic_bot: ${units} единиц перемещений`,
@@ -1621,19 +1620,11 @@ app.post('/payments/create', telegramAuth, requireDB, async (req, res) => {
         telegram_id: String(req.telegramId),
         units:       String(units),
       },
-      receipt: {
-        customer: { email },
-        items: [{
-          description: `Перемещения WB: ${units} ед.`,
-          quantity: '1.00',
-          amount: { value: Number(amount).toFixed(2), currency: 'RUB' },
-          vat_code: 1, // без НДС
-        }],
-      },
+      // receipt не добавляем — требует подключённую онлайн-кассу в ЮKassa
+      // Добавить позже когда касса будет настроена
     }, idempKey);
 
     if (payment.status === 'pending' && payment.confirmation?.confirmation_url) {
-      // Сохраняем ожидающий платёж в БД
       await db.query(
         `INSERT INTO payments (user_id, amount, units, status, yookassa_id, email)
          VALUES ($1, $2, $3, 'pending', $4, $5)
@@ -1642,8 +1633,10 @@ app.post('/payments/create', telegramAuth, requireDB, async (req, res) => {
       );
       return res.json({ confirmation_url: payment.confirmation.confirmation_url, payment_id: payment.id });
     }
-    console.error('[payments/create] ЮKassa error:', JSON.stringify(payment).slice(0, 200));
-    return res.status(502).json({ error: 'Не удалось создать платёж. Попробуйте позже.' });
+    console.error('[payments/create] ЮKassa error:', JSON.stringify(payment));
+    // Детальное сообщение из ответа ЮKassa
+    const ykErr = payment.description || payment.parameter || payment.code || 'Проверьте настройки ЮKassa';
+    return res.status(502).json({ error: `Ошибка ЮKassa: ${ykErr}. Попробуйте позже.` });
 
   } catch (err) {
     console.error('[payments/create] exception:', err.message);
