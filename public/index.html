@@ -542,6 +542,9 @@
       </div>
     </div>
 
+    <!-- Предупреждение об ограничении типа поставки (Монопаллета) -->
+    <div id="palletWarning" style="display:none;background:rgba(255,196,0,.12);border:1px solid #ffc400;border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text);line-height:1.5;margin-bottom:8px"></div>
+
     <!-- Шаг 7: Сохранить -->
     <div class="step" id="stepSave">
       <div id="createMsg" class="msg"></div>
@@ -1336,6 +1339,8 @@ async function searchArticle(nmId) {
     }
     document.getElementById('articleStatus').textContent = '';
     _state.card = { nmId, name: res.name, warehouses: res.warehouses || [] };
+    // Сохраняем карту разрешённых приёмников (для проверки ограничений Монопаллеты)
+    _state.allowedDestBySource = res.allowedDestBySource || {};
     document.getElementById('cardDisplay').value = `(${nmId}) ${res.name}`;
     document.getElementById('stepCardSelect').classList.add('on');
     buildFromDrop(res.warehouses || []);
@@ -1413,6 +1418,27 @@ function selectTo(name) {
   document.getElementById('clearTo').style.display = 'block';
   hideDrop('dropTo');
   document.getElementById('stepSave').classList.add('on');
+
+  // Проверка ограничений типа поставки (Монопаллета / Короб).
+  // После изменений WB с 7 июля 2026: если склад принимает только Монопаллету —
+  // он не будет в dstWarehouseIDs (transfer/list) и, скорее всего, отсутствует в
+  // нашем списке назначений. Если пользователь выбрал склад, НЕ входящий в
+  // разрешённые для выбранного источника — предупреждаем.
+  const srcName = _state.from;
+  const allowedBySource = _state.allowedDestBySource || {};
+  const palletMsg = document.getElementById('palletWarning');
+  if (palletMsg) {
+    const allowedIds = allowedBySource[srcName];
+    // allowedIds — массив officeID. Если он определён и непустой, но мы не можем
+    // сопоставить имя склада с ID без запроса — показываем общий совет.
+    // Если массив пустой для источника — источник вообще не разрешён к перемещению.
+    if (allowedIds && allowedIds.length === 0) {
+      palletMsg.style.display = 'block';
+      palletMsg.innerHTML = '⚠️ Склад «' + escHtml(srcName) + '» не может отправлять товар ни на один склад WB. Возможно, тип поставки Монопаллета. Проверьте <b>Поставки → FBW → Ограничения складов</b>.';
+    } else {
+      palletMsg.style.display = 'none';
+    }
+  }
 }
 
 let _whCache = [];      // FBS склады продавца (для справки)
@@ -1534,10 +1560,26 @@ async function submitPay() {
   const email = document.getElementById('payEmail').value.trim();
   if (!email || !email.includes('@')) { showMsg('payMsg','error','Введите корректный e-mail'); return; }
   if (!_tariff) { showMsg('payMsg','error','Выберите тариф'); return; }
+  const btn = document.getElementById('payBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Создаём платёж...'; }
   try {
-    await api('POST', '/payments/create', { email, units: _tariff.u, amount: _tariff.p, method: _payMethod });
-  } catch {
-    showMsg('payMsg','warn', `Платёж ${_tariff.p.toLocaleString('ru')} ₽ за ${_tariff.u.toLocaleString('ru')} ед. — ЮKassa будет подключена в ближайшее время.`);
+    const r = await api('POST', '/payments/create', {
+      email, units: _tariff.u, amount: _tariff.p
+    });
+    if (r.confirmation_url) {
+      // Открываем страницу оплаты ЮKassa
+      showMsg('payMsg','success','Переходим к оплате...');
+      setTimeout(() => {
+        if (tg && tg.openLink) tg.openLink(r.confirmation_url);
+        else window.open(r.confirmation_url, '_blank');
+      }, 500);
+    } else {
+      showMsg('payMsg','error', r.error || 'Не удалось создать платёж');
+    }
+  } catch(e) {
+    showMsg('payMsg','error', e.message || 'Ошибка создания платежа');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Оплатить'; }
   }
 }
 

@@ -111,10 +111,14 @@ async function initDB() {
       user_id      BIGINT NOT NULL,
       amount       NUMERIC(10, 2),
       units        INTEGER,
-      status       VARCHAR(50),
+      status       VARCHAR(50) DEFAULT 'pending',
       yookassa_id  VARCHAR(255) UNIQUE,
-      created_at   TIMESTAMP DEFAULT NOW()
+      email        VARCHAR(255),
+      created_at   TIMESTAMP DEFAULT NOW(),
+      updated_at   TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS email      VARCHAR(255);
+    ALTER TABLE payments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
   `);
   console.log('✅ Таблицы БД проверены/созданы');
 }
@@ -1490,8 +1494,6 @@ app.get('/transfers/article-stocks/:nmId', telegramAuth, requireDB, async (req, 
   const { nmId } = req.params;
   if (!/^\d+$/.test(nmId)) return res.status(400).json({ error: 'Некорректный артикул' });
   try {
-    // wb_token (Analytics) теперь НЕ обязателен — остатки берём через session (transfer/list).
-    // Токен используется лишь как доп. источник имени артикула / FBO-фоллбэка.
     const token = await getUserToken(req.telegramId);
     const { token: sessionToken, cookies: sessionCookies } = await getUserSessionToken(req.telegramId);
     if (!sessionToken) return res.status(401).json({ error: 'Сначала авторизуйтесь через SMS' });
@@ -1499,10 +1501,30 @@ app.get('/transfers/article-stocks/:nmId', telegramAuth, requireDB, async (req, 
     if (!article && (!warehouses || warehouses.length === 0)) return res.status(404).json({
       error: 'Артикул не найден или нет остатков на складах.'
     });
+
+    // Дополнительно: собираем карту разрешённых складов-приёмников из transfer/list.
+    // Используется на фронте для предупреждения «склад не принимает этот товар (Монопаллета)».
+    // Ключ = имя склада-источника, значение = Set officeID разрешённых приёмников.
+    let allowedDestBySource = {};
+    try {
+      const resp = await getTransferStockByWarehouse(sessionToken, nmId, sessionCookies);
+      for (const c of (resp || [])) {
+        const srcName = c.warehouseName || `Склад ${c.warehouseID}`;
+        if (!allowedDestBySource[srcName]) allowedDestBySource[srcName] = [];
+        if (Array.isArray(c.dstWarehouseIDs)) {
+          allowedDestBySource[srcName].push(...c.dstWarehouseIDs);
+        }
+      }
+      // Дедупликация
+      for (const k of Object.keys(allowedDestBySource)) {
+        allowedDestBySource[k] = [...new Set(allowedDestBySource[k])];
+      }
+    } catch { /* некритично, продолжаем без карты */ }
+
     console.log(`[article-stocks] nmId=${nmId} source=${source} warehouses=${warehouses.length}`);
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.set('Pragma', 'no-cache');
-    res.json({ nmId: article.nmId, name: article.name, warehouses });
+    res.json({ nmId: article.nmId, name: article.name, warehouses, allowedDestBySource });
   } catch(err) {
     console.error('article-stocks error:', err.message, err.hint || '');
     const hint = err.hint === 'statistics_token_required'
@@ -1544,11 +1566,143 @@ app.delete('/transfers/:id', telegramAuth, requireDB, async (req, res) => {
 // PAYMENTS — заглушка (планируется ЮKassa)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-app.post('/payments/create', telegramAuth, (req, res) => {
-  // TODO: интеграция с yookassa-sdk
-  res.status(503).json({
-    error: 'Платёжный сервис временно недоступен. Планируется интеграция с ЮKassa.'
+// ═══════════════════════════════════════════════════════════════════════════════
+// ЮKASSA — интеграция платёжного сервиса
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const YOOKASSA_SHOP_ID  = process.env.YOOKASSA_SHOP_ID  || '1350204';
+const YOOKASSA_SECRET   = process.env.YOOKASSA_SECRET_KEY;
+const { randomUUID }    = require('crypto');
+
+/** Вызов API ЮKassa с Basic-авторизацией */
+async function yookassaApi(method, path, body = null, idempotenceKey = null) {
+  const auth = Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET}`).toString('base64');
+  const res = await axios({
+    method,
+    url: `https://api.yookassa.ru/v2${path}`,
+    headers: {
+      'Authorization': `Basic ${auth}`,
+      'Content-Type':  'application/json',
+      'Idempotence-Key': idempotenceKey || randomUUID(),
+    },
+    data: body || undefined,
+    validateStatus: () => true,
+    timeout: 15000,
   });
+  return res.data;
+}
+
+/**
+ * POST /payments/create
+ * Создаёт платёж в ЮKassa. Возвращает URL для перенаправления пользователя.
+ * Body: { email, units, amount }
+ */
+app.post('/payments/create', telegramAuth, requireDB, async (req, res) => {
+  if (!YOOKASSA_SECRET) {
+    return res.status(503).json({ error: 'Платёжный сервис не настроен. Задайте YOOKASSA_SECRET_KEY в Variables.' });
+  }
+  const { email, units, amount } = req.body || {};
+  if (!email || !email.includes('@')) return res.status(400).json({ error: 'Укажите корректный e-mail' });
+  if (!units  || units < 1)       return res.status(400).json({ error: 'Укажите количество единиц' });
+  if (!amount || amount < 1)      return res.status(400).json({ error: 'Укажите сумму' });
+
+  try {
+    const idempKey = randomUUID(); // храним для идемпотентности
+    // Создаём платёж в ЮKassa
+    const payment = await yookassaApi('POST', '/payments', {
+      amount: { value: Number(amount).toFixed(2), currency: 'RUB' },
+      confirmation: {
+        type: 'redirect',
+        return_url: `${APP_URL}?payment=success`,
+      },
+      capture: true,
+      description: `WB_Logistic_bot: ${units} единиц перемещений`,
+      metadata: {
+        telegram_id: String(req.telegramId),
+        units:       String(units),
+      },
+      receipt: {
+        customer: { email },
+        items: [{
+          description: `Перемещения WB: ${units} ед.`,
+          quantity: '1.00',
+          amount: { value: Number(amount).toFixed(2), currency: 'RUB' },
+          vat_code: 1, // без НДС
+        }],
+      },
+    }, idempKey);
+
+    if (payment.status === 'pending' && payment.confirmation?.confirmation_url) {
+      // Сохраняем ожидающий платёж в БД
+      await db.query(
+        `INSERT INTO payments (user_id, amount, units, status, yookassa_id, email)
+         VALUES ($1, $2, $3, 'pending', $4, $5)
+         ON CONFLICT (yookassa_id) DO NOTHING`,
+        [req.telegramId, amount, units, payment.id, email]
+      );
+      return res.json({ confirmation_url: payment.confirmation.confirmation_url, payment_id: payment.id });
+    }
+    console.error('[payments/create] ЮKassa error:', JSON.stringify(payment).slice(0, 200));
+    return res.status(502).json({ error: 'Не удалось создать платёж. Попробуйте позже.' });
+
+  } catch (err) {
+    console.error('[payments/create] exception:', err.message);
+    return res.status(500).json({ error: 'Ошибка создания платежа: ' + err.message });
+  }
+});
+
+/**
+ * POST /payments/webhook/yookassa
+ * Принимает уведомления от ЮKassa (HTTP-уведомления).
+ * Добавить URL в ЮKassa: Интеграция → HTTP-уведомления → добавить URL:
+ *   https://wb-bot-backend-production.up.railway.app/payments/webhook/yookassa
+ */
+app.post('/payments/webhook/yookassa', express.json({ limit: '1mb' }), async (req, res) => {
+  // Сразу отвечаем 200 — иначе ЮKassa будет повторять запросы
+  res.json({ ok: true });
+
+  const event   = req.body;
+  const payment = event?.object;
+  if (!event || event.type !== 'notification' || !payment) return;
+  if (!db) return;
+
+  const yookassaId = payment.id;
+  const status     = payment.status; // pending / waiting_for_capture / succeeded / canceled
+
+  try {
+    if (status === 'succeeded') {
+      // Обновляем статус в БД
+      const upd = await db.query(
+        `UPDATE payments SET status='succeeded', updated_at=NOW()
+         WHERE yookassa_id=$1 AND status != 'succeeded'
+         RETURNING user_id, units, amount`,
+        [yookassaId]
+      );
+      if (!upd.rows.length) return; // уже обработан
+
+      const { user_id, units, amount } = upd.rows[0];
+      console.log(`[payments] ✅ платёж ${yookassaId} подтверждён | user=${user_id} units=${units}`);
+
+      // Уведомляем пользователя в Telegram
+      if (BOT_TOKEN && user_id) {
+        await tgApi('sendMessage', {
+          chat_id: user_id,
+          text: `✅ Оплата получена!\n\nПополнено: *${Number(units).toLocaleString('ru')} единиц* перемещений\nСумма: *${Number(amount).toLocaleString('ru')} ₽*\n\nВаш баланс обновлён. Откройте приложение, чтобы создать запросы.`,
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[{ text: '🚀 Открыть приложение', web_app: { url: APP_URL } }]] }
+        }).catch(e => console.warn('[payments] Telegram notify failed:', e.message));
+      }
+
+    } else if (status === 'canceled') {
+      await db.query(
+        `UPDATE payments SET status='canceled', updated_at=NOW() WHERE yookassa_id=$1`,
+        [yookassaId]
+      );
+      console.log(`[payments] ❌ платёж ${yookassaId} отменён`);
+    }
+  } catch (err) {
+    console.error('[payments/webhook] error:', err.message);
+  }
 });
 
 /**
@@ -1918,6 +2072,16 @@ async function processRequest(req) {
           [nextRetry, newCount, `409: ${wbDetail} (попытка ${newCount})`, req.id]
         );
         console.log(`[worker] ⚠️  #${req.id} повтор: ${wbDetail} → ${nextRetry.toISOString()}`);
+
+        // Если на складе не хватает товара — уведомляем пользователя ОДИН РАЗ (при первом обнаружении)
+        if (err.stockShortage && newCount === 1) {
+          const available = err.availableCount;
+          await notifyUser(
+            req.user_id,
+            `⚠️ Недостаток остатков\n\nСклад: ${req.from_warehouse}\nАртикул: ${req.sku}${req.product_name ? ' (' + req.product_name + ')' : ''}\n\nНа складе доступно сейчас: ${available} шт\nЗапрошено к перемещению: ${req.amount} шт\n\n✏️ Отредактируйте количество товаров к перемещению в заявке — укажите не более ${available} шт.`,
+            null
+          );
+        }
       }
 
     } else if (status === 400) {
@@ -2017,8 +2181,11 @@ async function executeRedistribution(wbToken, req) {
 
   // Проверяем что на складе хватает остатка
   if (srcWh.count < Number(req.amount)) {
-    const e = new Error(`На складе «${req.from_warehouse}» только ${srcWh.count} шт, запрошено ${req.amount}`);
+    const available = srcWh.count;
+    const e = new Error(`На складе «${req.from_warehouse}» только ${available} шт, запрошено ${req.amount}`);
     e.status = 409;
+    e.stockShortage = true;
+    e.availableCount = available;
     throw e;
   }
 
