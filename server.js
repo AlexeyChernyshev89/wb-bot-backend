@@ -1589,7 +1589,8 @@ async function yookassaApi(method, path, body = null, idempotenceKey = null) {
     validateStatus: () => true,
     timeout: 15000,
   });
-  return res.data;
+  console.log(`[yookassa] ${method} ${path} → HTTP ${res.status} | ${JSON.stringify(res.data).slice(0, 300)}`);
+  return { ...res.data, _httpStatus: res.status };
 }
 
 /**
@@ -1624,7 +1625,7 @@ app.post('/payments/create', telegramAuth, requireDB, async (req, res) => {
       // Добавить позже когда касса будет настроена
     }, idempKey);
 
-    if (payment.status === 'pending' && payment.confirmation?.confirmation_url) {
+    if ((payment._httpStatus === 200 || payment._httpStatus === 201) && payment.status === 'pending' && payment.confirmation?.confirmation_url) {
       await db.query(
         `INSERT INTO payments (user_id, amount, units, status, yookassa_id, email)
          VALUES ($1, $2, $3, 'pending', $4, $5)
@@ -1633,10 +1634,9 @@ app.post('/payments/create', telegramAuth, requireDB, async (req, res) => {
       );
       return res.json({ confirmation_url: payment.confirmation.confirmation_url, payment_id: payment.id });
     }
+    const ykErr = payment.description || payment.parameter || payment.code || `HTTP ${payment._httpStatus}`;
     console.error('[payments/create] ЮKassa error:', JSON.stringify(payment));
-    // Детальное сообщение из ответа ЮKassa
-    const ykErr = payment.description || payment.parameter || payment.code || 'Проверьте настройки ЮKassa';
-    return res.status(502).json({ error: `Ошибка ЮKassa: ${ykErr}. Попробуйте позже.` });
+    return res.status(502).json({ error: `Ошибка ЮKassa: ${ykErr}. Проверьте настройки магазина.` });
 
   } catch (err) {
     console.error('[payments/create] exception:', err.message);
