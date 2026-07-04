@@ -1598,6 +1598,25 @@ async function yookassaApi(method, path, body = null, idempotenceKey = null) {
  * Создаёт платёж в ЮKassa. Возвращает URL для перенаправления пользователя.
  * Body: { email, units, amount }
  */
+/**
+ * GET /payments/test-yookassa  (только для отладки — убрать после настройки)
+ * Проверяет подключение к ЮKassa: вызывает GET /me для проверки credetionals.
+ */
+app.get('/payments/test-yookassa', telegramAuth, async (req, res) => {
+  if (!YOOKASSA_SECRET) return res.json({ error: 'YOOKASSA_SECRET_KEY не задан в Variables' });
+  try {
+    const me = await yookassaApi('GET', '/me');
+    res.json({
+      ok: true,
+      shopId: YOOKASSA_SHOP_ID,
+      secretStart: YOOKASSA_SECRET.slice(0, 15) + '...',
+      response: me,
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 app.post('/payments/create', telegramAuth, requireDB, async (req, res) => {
   if (!YOOKASSA_SECRET) {
     return res.status(503).json({ error: 'Платёжный сервис не настроен. Задайте YOOKASSA_SECRET_KEY в Variables.' });
@@ -1916,7 +1935,7 @@ const WORKER_INTERVAL    = 10_000;  // 10 сек между циклами
 const API_DELAY          = 300;     // 300 мс между запросами к WB API (≤300 req/min)
 const RETRY_409_DELAY    = 30_000;       // 30 сек — как у конкурентов (мониторинг слотов)
 const RETRY_UNKNOWN_DELAY= 60_000;  // 60 сек повтор при неизвестной ошибке
-const MAX_RETRY_COUNT    = 2880;    // 2880 × 30 сек = 24 часа
+const MAX_RETRY_COUNT    = 5760;    // 5760 × 30 сек = 48 часов
 
 let workerRunning = false;
 const userRateLimits = {};  // { telegramId → timestamp до которого нельзя делать запросы }
