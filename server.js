@@ -1904,7 +1904,7 @@ app.post('/webhook', async (req, res) => {
       if (text.startsWith('/start')) {
         await tgApi('sendMessage', {
           chat_id: chatId,
-          text: '👋 Добро пожаловать в *WB\\_Logistic\\_bot*\n\nАвтоматизация перераспределения остатков товаров между складами Wildberries.\n\nНажмите кнопку ниже, чтобы открыть приложение:',
+          text: '👋 Добро пожаловать в *WB\\_Logistic\\_bot*\n\nАвтоматизация перераспределения остатков товаров между складами Wildberries\\.\n\n🔥 *Уважаемые пользователи, до сентября 2026 у нас низкая цена\\! Всего 1 рубль за перемещение 1 товара\\!*\n\nНажмите кнопку ниже, чтобы открыть приложение:',
           parse_mode: 'MarkdownV2',
           reply_markup: {
             inline_keyboard: [
