@@ -1601,10 +1601,11 @@ async function yookassaApi(method, path, body = null, idempotenceKey = null) {
       'Authorization': `Basic ${auth}`,
       'Content-Type':  'application/json',
       'Idempotence-Key': idempotenceKey || randomUUID(),
+      'ngrok-skip-browser-warning': 'true',
     },
     data: body || undefined,
     validateStatus: () => true,
-    timeout: 15000,
+    timeout: 20000,
   });
   console.log(`[yookassa] ${method} ${url} → HTTP ${res.status} | body sent: ${JSON.stringify(body).slice(0,200)} | response: ${JSON.stringify(res.data).slice(0, 300)}`);
   return { ...res.data, _httpStatus: res.status };
