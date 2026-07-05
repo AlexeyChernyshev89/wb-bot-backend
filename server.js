@@ -1574,6 +1574,13 @@ const YOOKASSA_SHOP_ID  = process.env.YOOKASSA_SHOP_ID  || '1350204';
 const YOOKASSA_SECRET   = process.env.YOOKASSA_SECRET_KEY;
 const { randomUUID }    = require('crypto');
 
+// Проверка конфигурации ЮKassa при старте
+if (YOOKASSA_SECRET) {
+  console.log(`[yookassa] ✅ настроен: shopId=${YOOKASSA_SHOP_ID}, secret=${YOOKASSA_SECRET.slice(0,10)}..., proxy=${process.env.YOOKASSA_PROXY_URL || 'нет'}`);
+} else {
+  console.warn('[yookassa] ⚠️ YOOKASSA_SECRET_KEY не задан — платежи недоступны');
+}
+
 /** Вызов API ЮKassa с Basic-авторизацией */
 async function yookassaApi(method, path, body = null, idempotenceKey = null) {
   const auth = Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET}`).toString('base64');
@@ -1599,7 +1606,7 @@ async function yookassaApi(method, path, body = null, idempotenceKey = null) {
     validateStatus: () => true,
     timeout: 15000,
   });
-  console.log(`[yookassa] ${method} ${path} → HTTP ${res.status} | ${JSON.stringify(res.data).slice(0, 300)}`);
+  console.log(`[yookassa] ${method} ${url} → HTTP ${res.status} | body sent: ${JSON.stringify(body).slice(0,200)} | response: ${JSON.stringify(res.data).slice(0, 300)}`);
   return { ...res.data, _httpStatus: res.status };
 }
 
