@@ -1144,6 +1144,10 @@ let _optionBlocked = false;
 
 function resetCreateForm() {
   _state = {};
+  // Сбрасываем кэш артикулов — при повторном открытии формы список загрузится заново
+  // (важно если пользователь перезашёл по SMS и сессия восстановилась)
+  _allArticles = null;
+  _articlesError = null;
   ['stepArticle','stepCardSelect','stepFrom','stepQty','stepTo','stepSave'].forEach(s => {
     document.getElementById(s)?.classList.remove('on');
   });
@@ -1283,15 +1287,18 @@ function onArticleInput() {
 // --- Выпадающий список всех артикулов продавца ---
 let _allArticles = null;       // кэш [{nmID, name}]
 let _articlesLoading = false;
+let _articlesError = null;      // текст ошибки от сервера (нет сессии / нет товаров)
 
 async function loadArticles() {
   if (_allArticles || _articlesLoading) return;
   _articlesLoading = true;
+  _articlesError = null;
   try {
     const res = await api('GET', '/transfers/articles');
     _allArticles = (res.articles || []);
   } catch (e) {
     _allArticles = [];
+    _articlesError = e.message || 'Не удалось загрузить список артикулов';
   } finally {
     _articlesLoading = false;
   }
@@ -1319,12 +1326,23 @@ async function toggleArticleList(ev) {
 
 function renderArticleList(filter) {
   const d = document.getElementById('dropArticles');
-  if (!d || !_allArticles) return;
+  if (!d) return;
+  // Ошибка загрузки (нет сессии / нет товаров) — показываем причину, а не «Ничего не найдено»
+  if (_articlesError) {
+    d.innerHTML = `<div class="dropdown-item" style="color:var(--text2);line-height:1.5;white-space:normal">${escHtml(_articlesError)}</div>`;
+    d.style.display = 'block';
+    return;
+  }
+  if (!_allArticles) return;
   const f = (filter || '').toLowerCase();
   const items = _allArticles.filter(a =>
     !f || String(a.nmID).includes(f) || (a.name || '').toLowerCase().includes(f)
   ).slice(0, 100);
-  if (!items.length) { d.innerHTML = '<div class="dropdown-item" style="color:var(--text2)">Ничего не найдено</div>'; d.style.display = 'block'; return; }
+  if (!items.length) {
+    const msg = _allArticles.length ? 'Ничего не найдено' : 'Список товаров пуст';
+    d.innerHTML = `<div class="dropdown-item" style="color:var(--text2)">${msg}</div>`;
+    d.style.display = 'block'; return;
+  }
   d.innerHTML = items.map(a =>
     `<div class="dropdown-item" onclick="pickArticle(${a.nmID})">(${a.nmID}) ${escHtml(a.name || '')}</div>`
   ).join('');

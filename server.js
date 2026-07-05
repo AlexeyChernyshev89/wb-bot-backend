@@ -1443,6 +1443,7 @@ app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
     if (!sessionToken && !wbToken) return res.status(401).json({ error: 'Сначала авторизуйтесь через SMS' });
 
     let items = [];
+    let sessionFailed = false;   // seller-supply вернул 401/403 (сессия не работает)
 
     // ОСНОВНОЙ путь: seller-supply/transfer/list БЕЗ nmIDs — вернёт активные товары
     // (те, что имеют FBO-остатки на складах — а именно они и нужны для перемещений).
@@ -1451,12 +1452,9 @@ app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
       try {
         const list = await getWbTransferList(sessionToken, null, sessionCookies);
         const transfers = list?.result?.transfers || list?.transfers || [];
-        // Из /list мы получаем nmID и остатки, но НЕ имя товара. Соберём nmIDs
-        // и запросим у seller-supply имена по chrtID/nmID.
         const nmIds = [...new Set(transfers.map(t => t.nmID).filter(Boolean))];
-        console.log(`[articles] seller-supply /list вернул ${nmIds.length} артикулов`);
+        console.log(`[articles] seller-supply /list вернул ${nmIds.length} артикулов (user=${req.telegramId})`);
 
-        // Пытаемся дополнить именами через getAllCards (если WB API-токен есть)
         let nameMap = {};
         if (wbToken) {
           try {
@@ -1470,7 +1468,10 @@ app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
         }
         items = nmIds.map(id => ({ nmID: id, name: nameMap[id] || `Артикул ${id}` }));
       } catch (e) {
-        console.warn('[articles] seller-supply path failed:', e.message);
+        console.warn('[articles] seller-supply path failed:', e.message, '| status:', e.status);
+        if (e.status === 401 || e.status === 403 || /401|403|supplier|сесси/i.test(e.message)) {
+          sessionFailed = true;
+        }
       }
     }
 
@@ -1488,7 +1489,16 @@ app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
     }
 
     if (!items.length) {
-      return res.status(404).json({ articles: [], count: 0, error: 'Список артикулов пуст. Проверьте, что у товаров есть FBO-остатки, или войдите заново через SMS.' });
+      if (sessionFailed || !sessionToken) {
+        return res.status(401).json({
+          articles: [], count: 0,
+          error: 'Сессия WB не активна. Войдите заново через SMS, чтобы бот получил доступ к вашим товарам.'
+        });
+      }
+      return res.status(404).json({
+        articles: [], count: 0,
+        error: 'Нет товаров с остатками на складах. Список формируется из товаров, которые есть на складах WB.'
+      });
     }
 
     // сортируем по имени, дедуп на всякий случай
