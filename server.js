@@ -1453,7 +1453,7 @@ app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
         const list = await getWbTransferList(sessionToken, null, sessionCookies);
         const transfers = list?.result?.transfers || list?.transfers || [];
         const nmIds = [...new Set(transfers.map(t => t.nmID).filter(Boolean))];
-        console.log(`[articles] seller-supply /list вернул ${nmIds.length} артикулов (user=${req.telegramId})`);
+        console.log(`[articles] seller-supply /list вернул ${nmIds.length} артикулов (user=${req.telegramId}) | raw keys: ${JSON.stringify(Object.keys(list||{}))} | transfers len: ${transfers.length}`);
 
         let nameMap = {};
         if (wbToken) {
