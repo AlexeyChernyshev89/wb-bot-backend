@@ -1589,10 +1589,10 @@ async function yookassaApi(method, path, body = null, idempotenceKey = null) {
   // (нужно когда Railway блокирует прямые запросы к api.yookassa.ru)
   const baseUrl = process.env.YOOKASSA_PROXY_URL
     ? process.env.YOOKASSA_PROXY_URL.replace(/\/$/, '')
-    : 'https://api.yookassa.ru/v2';
+    : 'https://api.yookassa.ru/v3';
   const url = process.env.YOOKASSA_PROXY_URL
     ? `${baseUrl}${path}`
-    : `https://api.yookassa.ru/v2${path}`;
+    : `https://api.yookassa.ru/v3${path}`;
 
   const res = await axios({
     method,
