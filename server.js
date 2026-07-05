@@ -609,6 +609,24 @@ app.post('/transfers/create', telegramAuth, requireDB, async (req, res) => {
     // не блокируем создание при ошибке проверки
   }
 
+  // Проверка баланса: количество в заявке не должно превышать доступный баланс.
+  try {
+    const available = await getAvailableBalance(req.telegramId);
+    const need = parseInt(amount, 10);
+    if (need > available) {
+      const over = need - available;
+      return res.status(409).json({
+        error: 'insufficient_balance',
+        message: `Количество товара в запросе (${need}) превышает текущий баланс перемещений (${Math.max(available,0)}) на ${over} ед. Отредактируйте количество товара в запросе (не более ${Math.max(available,0)} ед.) или пополните баланс.`,
+        available: Math.max(available, 0),
+        requested: need,
+      });
+    }
+  } catch (e) {
+    console.warn('[create] не удалось проверить баланс:', e.message);
+    // При ошибке проверки — не блокируем (не ломаем работу из-за сбоя БД)
+  }
+
   try {
     const result = await db.query(
       `INSERT INTO transfer_requests (user_id, from_warehouse, to_warehouse, sku, amount, status, product_name)
@@ -1737,31 +1755,58 @@ app.post('/payments/webhook/yookassa', express.json({ limit: '1mb' }), async (re
 
 /**
  * GET /payments/balance
- * Возвращает баланс (купленные единицы) и зарезервированные единицы для юзера.
+ * Модель баланса:
+ *   Куплено       = сумма успешных оплат (units)
+ *   Потрачено     = сумма реально перемещённых единиц (moved во всех заявках)
+ *   Зарезервировано = сумма ещё-не-перемещённого в активных заявках (amount - moved, pending)
+ *   Доступно (balance) = Куплено - Потрачено - Зарезервировано
  */
 app.get('/payments/balance', telegramAuth, requireDB, async (req, res) => {
   try {
-    // Баланс = сумма всех успешных пополнений
+    const uid = req.telegramId;
     const paid = await db.query(
       `SELECT COALESCE(SUM(units),0) AS total FROM payments
-       WHERE user_id=$1 AND status='succeeded'`,
-      [req.telegramId]
+       WHERE user_id=$1 AND status='succeeded'`, [uid]
     );
-    // Зарезервировано = кол-во единиц в активных (pending) заявках
+    // Потрачено — реально перемещённые единицы во всех заявках (moved)
+    const spent = await db.query(
+      `SELECT COALESCE(SUM(moved),0) AS total FROM transfer_requests
+       WHERE user_id=$1`, [uid]
+    );
+    // Зарезервировано — оставшееся к перемещению в активных заявках
     const reserved = await db.query(
-      `SELECT COALESCE(SUM(amount),0) AS total FROM transfer_requests
-       WHERE user_id=$1 AND status='pending'`,
-      [req.telegramId]
+      `SELECT COALESCE(SUM(GREATEST(amount - COALESCE(moved,0), 0)),0) AS total
+       FROM transfer_requests
+       WHERE user_id=$1 AND status='pending'`, [uid]
     );
+    const purchased    = Number(paid.rows[0]?.total || 0);
+    const spentTotal   = Number(spent.rows[0]?.total || 0);
+    const reservedTotal= Number(reserved.rows[0]?.total || 0);
+    const available    = purchased - spentTotal - reservedTotal;
     res.json({
-      balance:  Number(paid.rows[0]?.total  || 0),
-      reserved: Number(reserved.rows[0]?.total || 0),
+      balance:   Math.max(available, 0),   // доступно для новых заявок
+      reserved:  reservedTotal,            // зарезервировано в активных
+      purchased,                           // всего куплено
+      spent:     spentTotal,               // всего потрачено
     });
   } catch (err) {
     console.error('balance error:', err.message);
-    res.json({ balance: 0, reserved: 0 });
+    res.json({ balance: 0, reserved: 0, purchased: 0, spent: 0 });
   }
 });
+
+/** Вспомогательная: возвращает доступный баланс пользователя (для проверки при создании) */
+async function getAvailableBalance(userId) {
+  const paid = await db.query(
+    `SELECT COALESCE(SUM(units),0) AS total FROM payments WHERE user_id=$1 AND status='succeeded'`, [userId]);
+  const spent = await db.query(
+    `SELECT COALESCE(SUM(moved),0) AS total FROM transfer_requests WHERE user_id=$1`, [userId]);
+  const reserved = await db.query(
+    `SELECT COALESCE(SUM(GREATEST(amount - COALESCE(moved,0), 0)),0) AS total
+     FROM transfer_requests WHERE user_id=$1 AND status='pending'`, [userId]);
+  return Number(paid.rows[0].total) - Number(spent.rows[0].total) - Number(reserved.rows[0].total);
+}
+
 
 app.get('/payments/history', telegramAuth, requireDB, async (req, res) => {
   try {

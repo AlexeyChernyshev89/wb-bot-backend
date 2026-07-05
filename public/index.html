@@ -1109,6 +1109,7 @@ async function delTransfer(id) {
   try {
     await api('DELETE', `/transfers/${id}`);
     await loadList();
+    loadBalance();   // резерв освободился — обновляем баланс
   } catch(e) { alert('Ошибка: ' + e.message); }
 }
 
@@ -1118,6 +1119,7 @@ async function editQty(id, current) {
   try {
     await api('PATCH', `/transfers/${id}`, { amount: parseInt(val) });
     await loadList();
+    loadBalance();   // резерв изменился — обновляем баланс
   } catch(e) { alert('Ошибка: ' + e.message); }
 }
 
