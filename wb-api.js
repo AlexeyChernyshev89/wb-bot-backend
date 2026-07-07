@@ -892,7 +892,11 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
     }
     // Разбираем разные возможные формы ответа
     const result = res.data?.result || res.data || {};
-    const goods = result.goods || result.items || result.cards || result.list || [];
+    const goods = result.goods || result.items || result.cards || result.list || result.nomenclatures || [];
+    if (page === 0) {
+      // Диагностика: какие ключи в ответе и сколько товаров (убрать после настройки)
+      console.log(`[inventory] RAW keys: result=${JSON.stringify(Object.keys(result)).slice(0,150)} | goods найдено: ${Array.isArray(goods) ? goods.length : 'не массив'} | sample: ${JSON.stringify(goods[0] || {}).slice(0,200)}`);
+    }
     if (!Array.isArray(goods) || goods.length === 0) break;
     for (const g of goods) {
       const nmID = g.nmID || g.nmId || g.nomenclatureID;
