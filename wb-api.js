@@ -909,7 +909,8 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
     if (goods.length < LIMIT) break;   // последняя страница
     offset += LIMIT;
   }
-  console.log(`[inventory] получено ${all.length} товаров через inventoryManagement/list`);
+  const withStock = all.filter(g => g.quantity > 0).length;
+  console.log(`[inventory] получено ${all.length} товаров через inventoryManagement/list (с остатком >0: ${withStock})`);
   return all;
 }
 
