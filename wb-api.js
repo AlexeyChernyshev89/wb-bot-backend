@@ -838,6 +838,79 @@ async function getWbTransferList(sessionToken, nmId = null, sessionCookies = nul
 }
 
 /**
+ * Список ВСЕХ товаров продавца с остатками (для выпадающего списка артикулов).
+ * Использует inventoryManagement/list — тот же endpoint, что страница
+ * «Управление остатками» WB. Работает по SMS-сессии, без API-токена.
+ * Возвращает [{ nmID, name, vendorCode }].
+ */
+async function getInventoryList(sessionToken, sessionCookies = null) {
+  const INVENTORY_PATH = '/ns/goods-return/supply-manager/api/v1/inventoryManagement/list';
+  if (!sessionToken || !sessionToken.startsWith('eyJhbGciOiJSUzI1NiIs')) {
+    const e = new Error('Сессия истекла. Авторизуйтесь снова через SMS.');
+    e.status = 401; e.sessionExpired = true; throw e;
+  }
+  // Гарантируем x-supplier-id в куках
+  let cookies = sessionCookies || '';
+  if (!cookies.includes('x-supplier-id=')) {
+    const supplierId = getSupplierId(cookies, sessionToken);
+    if (supplierId) cookies += `${cookies ? '; ' : ''}x-supplier-id=${supplierId}; x-supplier-id-external=${supplierId}`;
+  }
+  const headers = {
+    Authorizev3:    sessionToken,
+    'Content-Type': 'application/json',
+    Accept:         '*/*',
+    Origin:         'https://seller.wildberries.ru',
+    Referer:        'https://seller.wildberries.ru/',
+    'User-Agent':   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  };
+  if (cookies) headers['Cookie'] = cookies;
+
+  const all = [];
+  const LIMIT = 100;
+  let offset = 0;
+  for (let page = 0; page < 50; page++) {   // до 5000 товаров максимум
+    const rpcBody = {
+      jsonrpc: '2.0',
+      id: `json-rpc_${Math.floor(Math.random() * 100000)}`,
+      params: {
+        filter: {
+          pagination: { limit: LIMIT, offset },
+          search: '', brandIDs: null, subjectIDs: null,
+          implementationRecommendationExist: null, withoutKIZ: false,
+        },
+      },
+    };
+    const res = await axios.post(`${WB_SELLER_SUPPLY}${INVENTORY_PATH}`, rpcBody,
+      { headers, timeout: 15000, validateStatus: () => true });
+    if (res.status === 401 || res.status === 403) {
+      const e = new Error(`Сессия истекла (${res.status}). Авторизуйтесь снова через SMS.`);
+      e.status = 401; e.sessionExpired = true; throw e;
+    }
+    if (res.data?.error) {
+      const e = new Error(res.data.error.message || 'Ошибка inventoryManagement');
+      e.status = res.status; e.wbDetail = res.data.error.message; throw e;
+    }
+    // Разбираем разные возможные формы ответа
+    const result = res.data?.result || res.data || {};
+    const goods = result.goods || result.items || result.cards || result.list || [];
+    if (!Array.isArray(goods) || goods.length === 0) break;
+    for (const g of goods) {
+      const nmID = g.nmID || g.nmId || g.nomenclatureID;
+      if (!nmID) continue;
+      all.push({
+        nmID,
+        name: (g.subjectName || g.title || g.name || g.vendorCode || `Артикул ${nmID}`).toString().trim(),
+        vendorCode: g.vendorCode || '',
+      });
+    }
+    if (goods.length < LIMIT) break;   // последняя страница
+    offset += LIMIT;
+  }
+  console.log(`[inventory] получено ${all.length} товаров через inventoryManagement/list`);
+  return all;
+}
+
+/**
  * Проверяет подключена ли у продавца платная опция
  * «Перераспределение остатков между складами» (redistributionSellerGoodsOneWarehouse).
  * Без неё перемещения невозможны.
@@ -1182,7 +1255,7 @@ module.exports = {
   getWarehouses, getStocks, updateStocks, deleteStocks,
   getCardsList, getAllCards, extractSkusFromCards,
   getArticleByNmId, getArticleStocks, getFboStocksRaw, getWbFboWarehouseNames,
-  getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList,
+  getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, getInventoryList,
   checkRedistributionOption,
   refreshWbSession,
   fetchSupplierId,

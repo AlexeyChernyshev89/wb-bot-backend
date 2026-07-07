@@ -10,7 +10,7 @@ const { Client } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
-const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, checkRedistributionOption, refreshWbSession, fetchSupplierId, onAntibotChange, getWarehouseSupplyTypes } = require('./wb-api');
+const { getWarehouses, getStocks, updateStocks, getAllCards, extractSkusFromCards, getArticleStocks, getWbFboWarehouseNames, getTransferAvailableLimits, getTransferStockByWarehouse, createWbTransfer, getWbTransferList, getInventoryList, checkRedistributionOption, refreshWbSession, fetchSupplierId, onAntibotChange, getWarehouseSupplyTypes } = require('./wb-api');
 const axios = require('axios');
 const path = require('path');
 const fs   = require('fs');
@@ -1445,37 +1445,22 @@ app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
     let items = [];
     let sessionFailed = false;   // seller-supply вернул 401/403 (сессия не работает)
 
-    // ОСНОВНОЙ путь: seller-supply/transfer/list БЕЗ nmIDs — вернёт активные товары
-    // (те, что имеют FBO-остатки на складах — а именно они и нужны для перемещений).
-    // Работает через SMS-сессию, не требует отдельного WB API-токена.
+    // ОСНОВНОЙ путь: inventoryManagement/list — список ВСЕХ товаров с остатками.
+    // Тот же endpoint, что страница «Управление остатками» WB. Работает по SMS-сессии.
     if (sessionToken) {
       try {
-        const list = await getWbTransferList(sessionToken, null, sessionCookies);
-        const transfers = list?.result?.transfers || list?.transfers || [];
-        const nmIds = [...new Set(transfers.map(t => t.nmID).filter(Boolean))];
-        console.log(`[articles] /list вернул ${nmIds.length} артикулов (user=${req.telegramId}) | RAW: ${JSON.stringify(list).slice(0, 500)}`);
-
-        let nameMap = {};
-        if (wbToken) {
-          try {
-            const cards = await getAllCards(wbToken);
-            for (const c of (cards || [])) {
-              const id = c.nmID || c.nmId;
-              const nm = (c.title || c.subjectName || c.vendorCode || '').toString().trim();
-              if (id && nm) nameMap[id] = nm;
-            }
-          } catch (e) { console.warn('[articles] getAllCards fail (не критично):', e.message); }
-        }
-        items = nmIds.map(id => ({ nmID: id, name: nameMap[id] || `Артикул ${id}` }));
+        const inv = await getInventoryList(sessionToken, sessionCookies);
+        items = inv.map(g => ({ nmID: g.nmID, name: g.name }));
+        console.log(`[articles] inventoryManagement вернул ${items.length} товаров (user=${req.telegramId})`);
       } catch (e) {
-        console.warn('[articles] seller-supply path failed:', e.message, '| status:', e.status);
+        console.warn('[articles] inventory path failed:', e.message, '| status:', e.status);
         if (e.status === 401 || e.status === 403 || /401|403|supplier|сесси/i.test(e.message)) {
           sessionFailed = true;
         }
       }
     }
 
-    // ФОЛБЭК: если seller-supply не дал ничего, а WB-токен есть — возьмём карточки
+    // ФОЛБЭК: если inventory не дал ничего, а WB-токен есть — возьмём карточки
     if (!items.length && wbToken) {
       try {
         const cards = await getAllCards(wbToken);
