@@ -1343,9 +1343,10 @@ function renderArticleList(filter) {
     d.innerHTML = `<div class="dropdown-item" style="color:var(--text2)">${msg}</div>`;
     d.style.display = 'block'; return;
   }
-  d.innerHTML = items.map(a =>
-    `<div class="dropdown-item" onclick="pickArticle(${a.nmID})">(${a.nmID}) ${escHtml(a.name || '')}</div>`
-  ).join('');
+  d.innerHTML = items.map(a => {
+    const qty = (a.quantity != null) ? ` · ${a.quantity} шт` : '';
+    return `<div class="dropdown-item" onclick="pickArticle(${a.nmID})">(${a.nmID}) ${escHtml(a.name || '')}${qty}</div>`;
+  }).join('');
   d.style.display = 'block';
 }
 

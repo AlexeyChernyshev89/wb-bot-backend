@@ -892,19 +892,18 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
     }
     // Разбираем разные возможные формы ответа
     const result = res.data?.result || res.data || {};
-    const goods = result.goods || result.items || result.cards || result.list || result.nomenclatures || [];
-    if (page === 0) {
-      // Диагностика: какие ключи в ответе и сколько товаров (убрать после настройки)
-      console.log(`[inventory] RAW keys: result=${JSON.stringify(Object.keys(result)).slice(0,150)} | goods найдено: ${Array.isArray(goods) ? goods.length : 'не массив'} | sample: ${JSON.stringify(goods[0] || {}).slice(0,200)}`);
-    }
+    // Реальная структура ответа WB: result.inventoryManagement[] с полями
+    // { nmID, imtName (название), subjectName (категория), nmSa (артикул продавца), quantity }
+    const goods = result.inventoryManagement || result.goods || result.items || [];
     if (!Array.isArray(goods) || goods.length === 0) break;
     for (const g of goods) {
       const nmID = g.nmID || g.nmId || g.nomenclatureID;
       if (!nmID) continue;
       all.push({
         nmID,
-        name: (g.subjectName || g.title || g.name || g.vendorCode || `Артикул ${nmID}`).toString().trim(),
-        vendorCode: g.vendorCode || '',
+        name: (g.imtName || g.subjectName || g.nmSa || `Артикул ${nmID}`).toString().trim(),
+        vendorCode: g.nmSa || '',
+        quantity: g.quantity || 0,
       });
     }
     if (goods.length < LIMIT) break;   // последняя страница

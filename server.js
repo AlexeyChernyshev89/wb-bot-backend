@@ -1450,7 +1450,7 @@ app.get('/transfers/articles', telegramAuth, requireDB, async (req, res) => {
     if (sessionToken) {
       try {
         const inv = await getInventoryList(sessionToken, sessionCookies);
-        items = inv.map(g => ({ nmID: g.nmID, name: g.name }));
+        items = inv.map(g => ({ nmID: g.nmID, name: g.name, quantity: g.quantity }));
         console.log(`[articles] inventoryManagement вернул ${items.length} товаров (user=${req.telegramId})`);
       } catch (e) {
         console.warn('[articles] inventory path failed:', e.message, '| status:', e.status);
