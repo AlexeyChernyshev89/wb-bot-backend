@@ -864,6 +864,13 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
     'User-Agent':   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   };
   if (cookies) headers['Cookie'] = cookies;
+  // WB читает wb-seller-lk и supplier-id из ОТДЕЛЬНЫХ заголовков (не только из кук).
+  // Без них inventoryManagement возвращает урезанный список (2 вместо 16).
+  const lkMatch = cookies.match(/wb-seller-lk=([^;]+)/);
+  if (lkMatch) headers['Wb-Seller-Lk'] = lkMatch[1];
+  const sidMatch = cookies.match(/x-supplier-id=([0-9a-f-]{36})/);
+  if (sidMatch) headers['X-Supplier-Id'] = sidMatch[1];
+  headers['Root-Version'] = 'v1.98.0';
 
   const all = [];
   const LIMIT = 20;               // WB некорректно отдаёт при больших limit — листаем малыми порциями
