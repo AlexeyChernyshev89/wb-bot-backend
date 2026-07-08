@@ -864,16 +864,39 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
     'User-Agent':   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   };
   if (cookies) headers['Cookie'] = cookies;
-  // WB читает wb-seller-lk и supplier-id из ОТДЕЛЬНЫХ заголовков (не только из кук).
-  // Без них inventoryManagement возвращает урезанный список (2 вместо 16).
+  // WB читает wb-seller-lk и supplier-id из ОТДЕЛЬНЫХ заголовков.
   const lkMatch = cookies.match(/wb-seller-lk=([^;]+)/);
   if (lkMatch) headers['Wb-Seller-Lk'] = lkMatch[1];
-  const sidMatch = cookies.match(/x-supplier-id=([0-9a-f-]{36})/);
-  if (sidMatch) headers['X-Supplier-Id'] = sidMatch[1];
+
+  // ПРАВИЛЬНЫЙ supplier_id берём из wb-seller-lk JWT (поле Z-Sid) — он гарантированно
+  // соответствует текущему поставщику. Regex по кукам ненадёжен: 'x-supplier-id='
+  // цепляет и 'x-supplier-id-external=', и устаревшие значения (был баг: слался чужой id).
+  let realSupplierId = null;
+  if (lkMatch) {
+    try {
+      const payload = JSON.parse(Buffer.from(lkMatch[1].split('.')[1], 'base64').toString('utf8'));
+      realSupplierId = payload?.data?.['Z-Sid'] || null;
+    } catch {}
+  }
+  // Фолбэк: external-кука (именно external, она содержит настоящий supplier_id)
+  if (!realSupplierId) {
+    const extMatch = cookies.match(/x-supplier-id-external=([0-9a-f-]{36})/);
+    if (extMatch) realSupplierId = extMatch[1];
+  }
+  if (realSupplierId) {
+    headers['X-Supplier-Id'] = realSupplierId;
+    // Чиним куки: заменяем возможный устаревший/чужой x-supplier-id на правильный
+    if (/x-supplier-id=[0-9a-f-]{36}/.test(cookies)) {
+      cookies = cookies.replace(/x-supplier-id=[0-9a-f-]{36}/, `x-supplier-id=${realSupplierId}`);
+    } else {
+      cookies += `; x-supplier-id=${realSupplierId}`;
+    }
+    headers['Cookie'] = cookies;
+  }
   headers['Root-Version'] = 'v1.100.0';
 
   // Диагностика: какие ключевые заголовки реально уходят
-  console.log(`[inventory] headers: wb-seller-lk=${headers['Wb-Seller-Lk'] ? 'ЕСТЬ('+headers['Wb-Seller-Lk'].length+')' : 'НЕТ'} | x-supplier-id=${headers['X-Supplier-Id'] || 'НЕТ'} | authorizev3=${sessionToken ? 'ЕСТЬ' : 'НЕТ'} | cookie len=${cookies.length}`);
+  console.log(`[inventory] headers: wb-seller-lk=${headers['Wb-Seller-Lk'] ? 'ЕСТЬ('+headers['Wb-Seller-Lk'].length+')' : 'НЕТ'} | supplier(Z-Sid)=${realSupplierId || 'НЕТ'} | authorizev3=${sessionToken ? 'ЕСТЬ' : 'НЕТ'}`);
 
   const all = [];
   const LIMIT = 20;               // WB некорректно отдаёт при больших limit — листаем малыми порциями
