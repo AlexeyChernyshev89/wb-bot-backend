@@ -866,9 +866,10 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
   if (cookies) headers['Cookie'] = cookies;
 
   const all = [];
-  const LIMIT = 100;
+  const LIMIT = 20;               // WB некорректно отдаёт при больших limit — листаем малыми порциями
   let offset = 0;
-  for (let page = 0; page < 50; page++) {   // до 5000 товаров максимум
+  let totalCount = null;
+  for (let page = 0; page < 100; page++) {   // до 2000 товаров максимум
     const rpcBody = {
       jsonrpc: '2.0',
       id: `json-rpc_${Math.floor(Math.random() * 100000)}`,
@@ -890,14 +891,9 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
       const e = new Error(res.data.error.message || 'Ошибка inventoryManagement');
       e.status = res.status; e.wbDetail = res.data.error.message; throw e;
     }
-    // Разбираем разные возможные формы ответа
     const result = res.data?.result || res.data || {};
     const goods = result.inventoryManagement || result.goods || result.items || [];
-    if (page === 0) {
-      // Диагностика: сколько всего товаров и общее число (total) в ответе WB
-      const total = result.total ?? result.totalCount ?? result.count ?? '?';
-      console.log(`[inventory] страница 0: пришло ${Array.isArray(goods)?goods.length:'не массив'} товаров | total в ответе: ${total} | ключи result: ${JSON.stringify(Object.keys(result)).slice(0,150)}`);
-    }
+    if (totalCount === null) totalCount = result.totalCount ?? result.total ?? null;
     if (!Array.isArray(goods) || goods.length === 0) break;
     for (const g of goods) {
       const nmID = g.nmID || g.nmId || g.nomenclatureID;
@@ -909,12 +905,15 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
         quantity: g.quantity || 0,
       });
     }
-    if (goods.length < LIMIT) break;   // последняя страница
     offset += LIMIT;
+    if (totalCount !== null && all.length >= totalCount) break;  // собрали всё
+    if (goods.length < LIMIT) break;                              // неполная страница
   }
-  const withStock = all.filter(g => g.quantity > 0).length;
-  console.log(`[inventory] получено ${all.length} товаров через inventoryManagement/list (с остатком >0: ${withStock})`);
-  return all;
+  // Показываем ТОЛЬКО товары с остатком > 0. Удалённые/распроданные (quantity 0)
+  // перемещать нечем — они лишь путают пользователя.
+  const withStock = all.filter(g => g.quantity > 0);
+  console.log(`[inventory] всего ${all.length} (totalCount=${totalCount}), с остатком >0: ${withStock.length}`);
+  return withStock;
 }
 
 /**
