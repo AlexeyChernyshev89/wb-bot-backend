@@ -870,7 +870,10 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
   if (lkMatch) headers['Wb-Seller-Lk'] = lkMatch[1];
   const sidMatch = cookies.match(/x-supplier-id=([0-9a-f-]{36})/);
   if (sidMatch) headers['X-Supplier-Id'] = sidMatch[1];
-  headers['Root-Version'] = 'v1.98.0';
+  headers['Root-Version'] = 'v1.100.0';
+
+  // Диагностика: какие ключевые заголовки реально уходят
+  console.log(`[inventory] headers: wb-seller-lk=${headers['Wb-Seller-Lk'] ? 'ЕСТЬ('+headers['Wb-Seller-Lk'].length+')' : 'НЕТ'} | x-supplier-id=${headers['X-Supplier-Id'] || 'НЕТ'} | authorizev3=${sessionToken ? 'ЕСТЬ' : 'НЕТ'} | cookie len=${cookies.length}`);
 
   const all = [];
   const LIMIT = 20;               // WB некорректно отдаёт при больших limit — листаем малыми порциями
