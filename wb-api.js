@@ -892,9 +892,12 @@ async function getInventoryList(sessionToken, sessionCookies = null) {
     }
     // Разбираем разные возможные формы ответа
     const result = res.data?.result || res.data || {};
-    // Реальная структура ответа WB: result.inventoryManagement[] с полями
-    // { nmID, imtName (название), subjectName (категория), nmSa (артикул продавца), quantity }
     const goods = result.inventoryManagement || result.goods || result.items || [];
+    if (page === 0) {
+      // Диагностика: сколько всего товаров и общее число (total) в ответе WB
+      const total = result.total ?? result.totalCount ?? result.count ?? '?';
+      console.log(`[inventory] страница 0: пришло ${Array.isArray(goods)?goods.length:'не массив'} товаров | total в ответе: ${total} | ключи result: ${JSON.stringify(Object.keys(result)).slice(0,150)}`);
+    }
     if (!Array.isArray(goods) || goods.length === 0) break;
     for (const g of goods) {
       const nmID = g.nmID || g.nmId || g.nomenclatureID;
