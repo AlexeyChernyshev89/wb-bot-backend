@@ -93,6 +93,8 @@ async function initDB() {
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS error_message  TEXT;
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS product_name   TEXT;
     ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS moved          INTEGER DEFAULT 0;
+    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS waybill        TEXT;
+    ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS waybill_mime   VARCHAR(120);
 
     -- История успешных перемещений для блокировки повтора той же пары товар→склад в течение 72ч.
     -- WB не даёт двигать ту же пару (товар + склад-источник) раньше чем через 72 часа.
@@ -1431,6 +1433,33 @@ app.get('/transfers/wb-warehouses', telegramAuth, requireDB, async (req, res) =>
 });
 
 /**
+ * GET /transfers/:id/waybill
+ * Отдаёт накладную (Excel) успешного перемещения для скачивания.
+ */
+app.get('/transfers/:id/waybill', telegramAuth, requireDB, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const r = await db.query(
+      'SELECT waybill, waybill_mime, sku FROM transfer_requests WHERE id=$1 AND user_id=$2',
+      [id, req.telegramId]
+    );
+    if (!r.rows.length || !r.rows[0].waybill) {
+      return res.status(404).json({ error: 'Накладная не найдена. Возможно, перемещение ещё не выполнено.' });
+    }
+    const { waybill, waybill_mime, sku } = r.rows[0];
+    const buf = Buffer.from(waybill, 'base64');
+    const mime = waybill_mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const ext = /excel|spreadsheet|xlsx/i.test(mime) ? 'xlsx' : 'pdf';
+    res.set('Content-Type', mime);
+    res.set('Content-Disposition', `attachment; filename="nakladnaya_${sku}_${id}.${ext}"`);
+    res.send(buf);
+  } catch (err) {
+    console.error('[waybill] ошибка:', err.message);
+    res.status(500).json({ error: 'Не удалось получить накладную' });
+  }
+});
+
+/**
  * GET /transfers/articles
  * Список артикулов продавца с наименованиями для выпадающего списка.
  * Работает через SMS-сессию (seller-supply/transfer/list с пустым nmIDs).
@@ -2092,10 +2121,11 @@ async function processRequest(req) {
     }
 
     if (wasMoved >= total) {
-      // ✅ Полностью перемещено
+      // ✅ Полностью перемещено — сохраняем накладную
       await db.query(
-        `UPDATE transfer_requests SET status='done', moved=\$2, error_message=NULL, updated_at=NOW() WHERE id=\$1`,
-        [req.id, total]
+        `UPDATE transfer_requests SET status='done', moved=\$2, error_message=NULL, updated_at=NOW(),
+         waybill=COALESCE(\$3, waybill), waybill_mime=COALESCE(\$4, waybill_mime) WHERE id=\$1`,
+        [req.id, total, result.waybill || null, result.waybillMime || null]
       );
       await notifyUser(req.user_id, '‼️ Заявка на перемещение выполнена ‼️', req);
       console.log(`[worker] ✅ #${req.id} выполнена полностью (${total} ед)`);
@@ -2409,6 +2439,7 @@ async function executeRedistribution(wbToken, req) {
       throw e;
     }
     createResult = orderData.result;  // { file, mime }
+    console.log(`[worker] ✅ #${req.id} WB подтвердил: file=${String(createResult.file).length} симв, mime=${createResult.mime || '?'}, keys=${JSON.stringify(Object.keys(orderData.result))}`);
   } else {
     // Фолбэк (если прокси-URL не задан): прямой вызов. /order уйдёт с Railway —
     // сработает только если WB не сверяет IP. Логируем предупреждение.
@@ -2428,8 +2459,11 @@ async function executeRedistribution(wbToken, req) {
   }
   console.log(`[worker] ✅ перемещено ${moveNow} ед (накладная получена)`);
 
-  // Возвращаем сколько переместили — обработчик решит done или продолжать частями
-  return { moved: moveNow, total: Number(req.amount), wasMoved: alreadyMoved + moveNow };
+  // Возвращаем сколько переместили + накладную (для сохранения и скачивания)
+  return {
+    moved: moveNow, total: Number(req.amount), wasMoved: alreadyMoved + moveNow,
+    waybill: createResult.file, waybillMime: createResult.mime,
+  };
 }
 
 /**

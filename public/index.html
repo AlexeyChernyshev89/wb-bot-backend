@@ -1110,11 +1110,37 @@ function renderTransfers() {
         </div>
         <div class="tr-actions">
           ${r.status==='pending' ? `<button class="icon-btn icon-btn-edit" onclick="editQty(${r.id},${r.amount})" title="Редактировать">✏️</button>` : ''}
+          ${r.status==='done' ? `<button class="icon-btn" style="background:var(--surf2);color:var(--accent)" onclick="downloadWaybill(${r.id})" title="Скачать накладную">📄</button>` : ''}
           <button class="icon-btn icon-btn-del" onclick="delTransfer(${r.id})" title="Удалить">🗑</button>
         </div>
       </div>
     </div>`;
   }).join('');
+}
+
+async function downloadWaybill(id) {
+  try {
+    const res = await fetch(`/transfers/${id}/waybill`, {
+      headers: { 'Authorization': 'tma ' + initData }
+    });
+    if (!res.ok) {
+      let msg = 'Не удалось скачать накладную';
+      try { const j = await res.json(); msg = j.error || msg; } catch {}
+      alert(msg);
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nakladnaya_${id}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Ошибка скачивания: ' + e.message);
+  }
 }
 
 async function delTransfer(id) {
