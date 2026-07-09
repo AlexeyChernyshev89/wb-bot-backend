@@ -7,21 +7,21 @@
   <title>WB Supply Helper</title>
   <style>
     :root {
-      /* iOS тёмная тема — системные цвета Apple */
-      --bg:       #000000;   /* systemBackground (dark) */
-      --surf:     #1c1c1e;   /* secondarySystemBackground */
-      --surf2:    #2c2c2e;   /* tertiarySystemBackground */
-      --surf3:    #3a3a3c;   /* systemGray4 */
-      --border:   #38383a;   /* separator (opaque) */
-      --accent:   #0a84ff;   /* systemBlue (dark) */
+      /* iOS светлая тема — системные цвета Apple */
+      --bg:       #f2f2f7;   /* systemGroupedBackground (light) */
+      --surf:     #ffffff;   /* secondarySystemGroupedBackground — карточки */
+      --surf2:    #e9e9eb;   /* нажатие/подложки */
+      --surf3:    #d1d1d6;   /* systemGray4 */
+      --border:   #c6c6c8;   /* separator (light) */
+      --accent:   #007aff;   /* systemBlue (light) */
       --accent2:  #0060df;
-      --accent-bg:#0a2540;
-      --text:     #ffffff;   /* label */
+      --accent-bg:#e5f0ff;
+      --text:     #000000;   /* label */
       --text2:    #8e8e93;   /* secondaryLabel / systemGray */
-      --danger:   #ff453a;   /* systemRed (dark) */
-      --success:  #30d158;   /* systemGreen (dark) */
-      --warning:  #ffd60a;   /* systemYellow (dark) */
-      --pending:  #bf5af2;   /* systemPurple (dark) */
+      --danger:   #ff3b30;   /* systemRed (light) */
+      --success:  #34c759;   /* systemGreen (light) */
+      --warning:  #ff9500;   /* systemOrange (light) */
+      --pending:  #af52de;   /* systemPurple (light) */
       --radius:   14px;      /* iOS-скругление карточек */
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -709,7 +709,7 @@ const tg = window.Telegram?.WebApp;
 const initData = tg?.initData || '';
 const isReal = initData.includes('hash=');
 
-if (tg) { tg.ready(); tg.expand?.(); tg.setHeaderColor?.('#12131e'); tg.setBackgroundColor?.('#12131e'); }
+if (tg) { tg.ready(); tg.expand?.(); tg.setHeaderColor?.('#f2f2f7'); tg.setBackgroundColor?.('#f2f2f7'); }
 
 const H = { 'Content-Type':'application/json', 'Authorization':'tma '+initData };
 
@@ -943,13 +943,13 @@ async function init() {
 
 function showNoTg() {
   document.body.innerHTML = `
-    <div style="padding:32px 20px;font-family:-apple-system,sans-serif;background:#12131e;min-height:100vh;color:#f0f1ff">
+    <div style="padding:32px 20px;font-family:-apple-system,sans-serif;background:#f2f2f7;min-height:100vh;color:#000">
       <div style="text-align:center;font-size:48px;margin-bottom:16px">⚠️</div>
-      <h2 style="text-align:center;font-size:20px;font-weight:800;margin-bottom:12px">Откройте через Telegram</h2>
-      <p style="font-size:14px;color:#8b8fa8;text-align:center;line-height:1.6;margin-bottom:20px">
+      <h2 style="text-align:center;font-size:20px;font-weight:700;margin-bottom:12px;letter-spacing:-0.4px">Откройте через Telegram</h2>
+      <p style="font-size:14px;color:#8e8e93;text-align:center;line-height:1.6;margin-bottom:20px">
         Приложение работает только как Telegram Mini App
       </p>
-      <div style="background:#1c1d2e;border:1px solid #333450;border-radius:12px;padding:16px;font-size:13px;color:#8b8fa8;line-height:1.8">
+      <div style="background:#fff;border-radius:14px;padding:16px;font-size:13px;color:#3c3c43;line-height:1.8">
         1. Найдите бота в Telegram<br>
         2. Напишите /start<br>
         3. Нажмите кнопку <b style="color:var(--accent)">«🛒 Открыть приложение»</b>
