@@ -426,6 +426,10 @@
       <span class="menu-icon">₽</span> Оплата
       <span class="menu-chevron">›</span>
     </button>
+    <button class="menu-item" onclick="go('promo')">
+      <span class="menu-icon">🎁</span> Промокод
+      <span class="menu-chevron">›</span>
+    </button>
     <button class="menu-item" onclick="go('history')">
       <span class="menu-icon">≔</span> История оплат
       <span class="menu-chevron">›</span>
@@ -619,6 +623,24 @@
   <button class="btn btn-accent" onclick="submitPay()">Оплатить</button>
 </div>
 
+<!-- ═══════ PROMO ═══════ -->
+<div id="screenPromo" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('main')">‹</button>
+    <span class="screen-title">Промокод</span>
+  </div>
+
+  <div style="background:var(--surf);border-radius:var(--radius);padding:20px 16px;margin-bottom:16px">
+    <div style="font-size:15px;color:var(--text2);line-height:1.6;margin-bottom:16px">
+      Введите промокод, чтобы получить бесплатные перемещения на баланс.
+    </div>
+    <input type="text" id="promoInput" placeholder="WBLOG-XXXXX"
+      style="width:100%;background:var(--surf2);border:none;border-radius:12px;padding:14px;color:var(--text);font-size:17px;text-align:center;text-transform:uppercase;letter-spacing:1px;outline:none;margin-bottom:14px" />
+    <button class="btn btn-accent" onclick="submitPromo()">Активировать</button>
+    <div id="promoMsg" class="msg" style="margin-top:12px"></div>
+  </div>
+</div>
+
 <!-- ═══════ HISTORY ═══════ -->
 <div id="screenHistory" class="screen">
   <div style="display:flex;gap:8px;margin-bottom:18px">
@@ -723,7 +745,7 @@ async function api(method, url, body) {
 // ═══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ═══════════════════════════════════════════════════════
-const screens = ['Auth','Main','List','Create','Batch','Pay','History','Quotas','Stats','UpdateToken'];
+const screens = ['Auth','Main','List','Create','Batch','Pay','Promo','History','Quotas','Stats','UpdateToken'];
 function go(name) {
   screens.forEach(s => {
     const el = document.getElementById('screen' + s.charAt(0).toUpperCase() + s.slice(1));
@@ -1614,6 +1636,20 @@ function selTariff(i) {
   document.querySelectorAll('.tariff-row').forEach(r => r.classList.remove('sel'));
   document.getElementById('tr'+i)?.classList.add('sel');
   _tariff = TARIFFS[i];
+}
+
+async function submitPromo() {
+  const code = document.getElementById('promoInput').value.trim().toUpperCase();
+  if (!code) { showMsg('promoMsg','error','Введите промокод'); return; }
+  try {
+    const r = await api('POST', '/payments/promo', { code });
+    showMsg('promoMsg','success', `✅ Начислено ${r.units} перемещений! Баланс: ${r.balance}`);
+    document.getElementById('promoInput').value = '';
+    loadBalance();
+    setTimeout(() => go('main'), 1800);
+  } catch(e) {
+    showMsg('promoMsg','error', e.message || 'Не удалось активировать промокод');
+  }
 }
 
 async function submitPay() {

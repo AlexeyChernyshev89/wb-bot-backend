@@ -121,6 +121,15 @@ async function initDB() {
     );
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS email      VARCHAR(255);
     ALTER TABLE payments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
+    -- Промокоды: каждый даёт фиксированное число единиц перемещений, активируется 1 раз
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      code          VARCHAR(32) PRIMARY KEY,
+      units         INTEGER NOT NULL,
+      used_by       BIGINT,               -- telegram_id того, кто активировал (NULL = не использован)
+      used_at       TIMESTAMP,
+      created_at    TIMESTAMP DEFAULT NOW()
+    );
   `);
   console.log('✅ Таблицы БД проверены/созданы');
 }
@@ -1830,6 +1839,54 @@ async function getAvailableBalance(userId) {
      FROM transfer_requests WHERE user_id=$1 AND status='pending'`, [userId]);
   return Number(paid.rows[0].total) - Number(spent.rows[0].total) - Number(reserved.rows[0].total);
 }
+
+/**
+ * POST /payments/promo
+ * Активация промокода. Body: { code }.
+ * Начисляет units из промокода на баланс пользователя (через запись в payments).
+ * Каждый код одноразовый.
+ */
+app.post('/payments/promo', telegramAuth, requireDB, async (req, res) => {
+  const raw = (req.body?.code || '').trim().toUpperCase();
+  if (!raw) return res.status(400).json({ error: 'Введите промокод' });
+
+  try {
+    // Атомарно помечаем код использованным (только если ещё не использован)
+    const upd = await db.query(
+      `UPDATE promo_codes SET used_by=$1, used_at=NOW()
+       WHERE code=$2 AND used_by IS NULL
+       RETURNING units`,
+      [req.telegramId, raw]
+    );
+
+    if (!upd.rows.length) {
+      // Код не существует, или уже использован — уточним причину
+      const exists = await db.query('SELECT used_by FROM promo_codes WHERE code=$1', [raw]);
+      if (!exists.rows.length) {
+        return res.status(404).json({ error: 'Промокод не найден. Проверьте правильность.' });
+      }
+      if (exists.rows[0].used_by === req.telegramId) {
+        return res.status(409).json({ error: 'Вы уже активировали этот промокод.' });
+      }
+      return res.status(409).json({ error: 'Промокод уже был использован.' });
+    }
+
+    const units = upd.rows[0].units;
+    // Начисляем на баланс — запись в payments как succeeded
+    await db.query(
+      `INSERT INTO payments (user_id, amount, units, status, yookassa_id, created_at)
+       VALUES ($1, 0, $2, 'succeeded', $3, NOW())`,
+      [req.telegramId, units, `promo_${raw}_${req.telegramId}`]
+    );
+
+    const available = await getAvailableBalance(req.telegramId);
+    console.log(`[promo] ✅ ${raw} активирован user=${req.telegramId} (+${units} ед)`);
+    res.json({ success: true, units, balance: Math.max(available, 0) });
+  } catch (err) {
+    console.error('[promo] ошибка:', err.message);
+    res.status(500).json({ error: 'Не удалось активировать промокод' });
+  }
+});
 
 
 app.get('/payments/history', telegramAuth, requireDB, async (req, res) => {
