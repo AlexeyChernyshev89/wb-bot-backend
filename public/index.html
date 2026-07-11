@@ -430,6 +430,10 @@
       <span class="menu-icon">🎁</span> Промокод
       <span class="menu-chevron">›</span>
     </button>
+    <button class="menu-item" onclick="go('help')">
+      <span class="menu-icon">❓</span> Помощь
+      <span class="menu-chevron">›</span>
+    </button>
     <button class="menu-item" onclick="go('history')">
       <span class="menu-icon">≔</span> История оплат
       <span class="menu-chevron">›</span>
@@ -641,6 +645,71 @@
   </div>
 </div>
 
+<!-- ═══════ HELP ═══════ -->
+<div id="screenHelp" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="go('main')">‹</button>
+    <span class="screen-title">Помощь</span>
+  </div>
+
+  <div style="background:var(--surf);border-radius:var(--radius);padding:18px 16px;margin-bottom:14px">
+    <div style="font-size:16px;font-weight:600;margin-bottom:8px">📦 Что делает бот</div>
+    <div style="font-size:14px;color:var(--text2);line-height:1.6">
+      Автоматически перемещает ваши остатки между складами Wildberries. Вы создаёте заявку — бот ловит открытие квоты и выполняет перемещение сам, круглосуточно.
+    </div>
+  </div>
+
+  <div style="background:var(--surf);border-radius:var(--radius);padding:18px 16px;margin-bottom:14px">
+    <div style="font-size:16px;font-weight:600;margin-bottom:10px">🚀 Начало работы</div>
+    <div style="font-size:14px;color:var(--text2);line-height:1.7">
+      1. Нажмите «Вход через SMS»<br>
+      2. Введите номер, привязанный к кабинету WB<br>
+      3. Введите код из SMS — бот подключится к вашему кабинету
+    </div>
+  </div>
+
+  <div style="background:var(--surf);border-radius:var(--radius);padding:18px 16px;margin-bottom:14px">
+    <div style="font-size:16px;font-weight:600;margin-bottom:10px">➕ Создание заявки</div>
+    <div style="font-size:14px;color:var(--text2);line-height:1.7">
+      1. «Создать запрос»<br>
+      2. Выберите артикул (показаны товары с остатками)<br>
+      3. Укажите склад-источник (откуда забрать)<br>
+      4. Введите количество<br>
+      5. Выберите склад назначения (куда отправить)<br>
+      6. «Сохранить»<br><br>
+      Заявка встанет в очередь «⏳ Ожидает». Как только WB откроет квоту — бот выполнит перемещение и пришлёт уведомление.
+    </div>
+  </div>
+
+  <div style="background:var(--surf);border-radius:var(--radius);padding:18px 16px;margin-bottom:14px">
+    <div style="font-size:16px;font-weight:600;margin-bottom:10px">📄 После выполнения</div>
+    <div style="font-size:14px;color:var(--text2);line-height:1.7">
+      Придёт уведомление «Заявка выполнена». В списке заявок появится кнопка 📄 — скачать накладную, подтверждающую перемещение от WB.
+    </div>
+  </div>
+
+  <div style="background:var(--surf);border-radius:var(--radius);padding:18px 16px;margin-bottom:14px">
+    <div style="font-size:16px;font-weight:600;margin-bottom:10px">💰 Баланс перемещений</div>
+    <div style="font-size:14px;color:var(--text2);line-height:1.7">
+      1 ₽ = 1 перемещение.<br>
+      «Оплата» — пополнить баланс.<br>
+      «🎁 Промокод» — активировать бесплатные перемещения.<br>
+      На главном экране видно доступный баланс и зарезервировано.
+    </div>
+  </div>
+
+  <div style="background:rgba(255,214,10,.1);border:1px solid var(--warning);border-radius:var(--radius);padding:16px;margin-bottom:14px">
+    <div style="font-size:15px;font-weight:600;margin-bottom:8px">⚠️ Правила WB с 9 июля 2026</div>
+    <div style="font-size:13px;color:var(--text2);line-height:1.6">
+      Перемещение возможно, только если склад назначения принимает товар типами «Короб» или «Поштучная паллета». Товары только с типом «Монопаллета» переместить нельзя.
+    </div>
+  </div>
+
+  <a href="https://t.me/Chernyshevofficial" target="_blank" style="text-decoration:none">
+    <button class="btn btn-accent">💬 Написать в поддержку</button>
+  </a>
+</div>
+
 <!-- ═══════ HISTORY ═══════ -->
 <div id="screenHistory" class="screen">
   <div style="display:flex;gap:8px;margin-bottom:18px">
@@ -745,7 +814,7 @@ async function api(method, url, body) {
 // ═══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ═══════════════════════════════════════════════════════
-const screens = ['Auth','Main','List','Create','Batch','Pay','Promo','History','Quotas','Stats','UpdateToken'];
+const screens = ['Auth','Main','List','Create','Batch','Pay','Promo','Help','History','Quotas','Stats','UpdateToken'];
 function go(name) {
   screens.forEach(s => {
     const el = document.getElementById('screen' + s.charAt(0).toUpperCase() + s.slice(1));
