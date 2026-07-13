@@ -1,4 +1,4 @@
-// server.js — WB Supply Helper Backend
+// server.js — WB_Logistic_bot Backend
 // Авторизация продавца: Bearer API-токен из ЛК Wildberries
 // Telegram Mini App: валидация initData через @telegram-apps/init-data-node
 
