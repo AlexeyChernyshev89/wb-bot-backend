@@ -136,17 +136,27 @@ async function initDB() {
 
 // Флаг готовности БД — маршруты возвращают 503 пока БД не поднялась
 let dbReady = false;
+let dbConnected = false;   // клиент уже физически подключён (connect() вызывать нельзя повторно)
 
 async function connectDB(attempt = 1) {
   try {
-    await db.connect();
-    console.log('✅ PostgreSQL подключён');
+    // db.connect() можно вызвать ТОЛЬКО ОДИН раз на клиента.
+    // Повторный вызов кидает "Client has already been connected".
+    if (!dbConnected) {
+      await db.connect();
+      dbConnected = true;
+      console.log('✅ PostgreSQL подключён');
+    }
+    // initDB может падать отдельно (миграции) — повторяем только её, без reconnect
     await initDB();
     dbReady = true;
+    console.log('✅ БД готова к работе');
   } catch (err) {
-    const delay = Math.min(attempt * 2000, 30000); // макс 30 сек между попытками
-    console.error(`❌ Ошибка подключения к БД (попытка ${attempt}):`, err.message);
-    console.log(`🔄 Повтор через ${delay / 1000} сек...`);
+    const delay = Math.min(attempt * 2000, 30000);
+    // Показываем ПОЛНУЮ ошибку (stack) — чтобы видеть, на какой миграции падает
+    console.error(`❌ Ошибка инициализации БД (попытка ${attempt}):`, err.message);
+    if (err.stack) console.error(err.stack.split('\n').slice(0, 4).join('\n'));
+    console.log(`🔄 Повтор initDB через ${delay / 1000} сек...`);
     setTimeout(() => connectDB(attempt + 1), delay);
   }
 }
