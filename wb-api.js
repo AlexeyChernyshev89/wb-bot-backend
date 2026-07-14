@@ -431,14 +431,19 @@ async function getArticleStocks(token, nmId, sessionToken, sessionCookies = null
         // и т.п.), с которых WB на самом деле не даст перемещать.
         const byWarehouse = {};
         let filteredOutMuted = 0;
+        const filteredNames = [];
         for (const c of chrts) {
           const dstAllowed = Array.isArray(c.dstWarehouseIDs) && c.dstWarehouseIDs.length > 0;
-          if (!dstAllowed) { filteredOutMuted += (c.count || 0); continue; }
+          if (!dstAllowed) {
+            filteredOutMuted += (c.count || 0);
+            if (c.count > 0) filteredNames.push(`${c.warehouseName}(${c.count})`);
+            continue;
+          }
           const name = c.warehouseName || `Склад ${c.warehouseID}`;
           byWarehouse[name] = (byWarehouse[name] || 0) + (c.count || 0);
         }
-        if (filteredOutMuted > 0) {
-          console.log(`[stocks] nmId=${nmId}: отфильтровано ${filteredOutMuted} ед — склады без разрешения на перемещение`);
+        if (filteredNames.length > 0) {
+          console.log(`[stocks] nmId=${nmId}: СКРЫТЫ склады (dstWarehouseIDs пуст): ${filteredNames.join(', ')}`);
         }
         const warehouses = Object.entries(byWarehouse)
           .map(([name, amount]) => ({ name, amount }))

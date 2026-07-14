@@ -683,7 +683,7 @@ app.post('/transfers/create', telegramAuth, requireDB, async (req, res) => {
 app.get('/transfers/list', telegramAuth, requireDB, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT id, user_id, from_warehouse, to_warehouse, sku, amount, status, retry_count, error_message, next_retry_at, created_at, updated_at FROM transfer_requests WHERE user_id = $1 ORDER BY created_at DESC',
+      'SELECT id, user_id, from_warehouse, to_warehouse, sku, amount, status, retry_count, error_message, next_retry_at, created_at, updated_at, product_name FROM transfer_requests WHERE user_id = $1 ORDER BY created_at DESC',
       [req.telegramId]
     );
     res.json(result.rows);
@@ -2015,6 +2015,7 @@ app.post('/webhook', async (req, res) => {
           reply_markup: {
             inline_keyboard: [
               [{ text: '🚀 Открыть приложение', web_app: { url: APP_URL } }],
+              [{ text: '📢 Канал бота', url: process.env.BOT_CHANNEL_URL || 'https://t.me/wb_logistic_news' }],
               [{ text: '💬 Поддержка', url: 'https://t.me/Chernyshevofficial' }]
             ]
           }

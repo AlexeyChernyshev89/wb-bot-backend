@@ -1196,6 +1196,7 @@ function renderTransfers() {
       <div class="tr-footer">
         <div class="tr-meta" style="flex:1;min-width:0">
           Арт: <b>${r.sku}</b> &nbsp; Кол-во: <b>${r.amount}</b>
+          ${r.product_name ? `<div style="font-size:13px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.product_name)}</div>` : ''}
           <div style="margin-top:4px">${statusBadge(r.status)}</div>
           ${retryHtml}${errHtml}
         </div>
