@@ -6,7 +6,7 @@ require('dotenv').config();
 const express    = require('express');
 const cors       = require('cors');
 const bodyParser = require('body-parser');
-const { Client } = require('pg');
+const { Pool } = require('pg');
 const crypto = require('crypto');
 // @telegram-apps/init-data-node заменён на прямую реализацию алгоритма Telegram
 const { validateWbToken, decodeWbToken, requestSmsCode, confirmSmsCode } = require('./wb-auth');
@@ -42,7 +42,29 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── База данных ──────────────────────────────────────────────────────────────
-const db = new Client({ connectionString: process.env.DATABASE_URL });
+// КРИТИЧНО: ловим необработанные ошибки на уровне процесса, чтобы единичный
+// сбой (разрыв соединения, ошибка в промисе) не ронял весь бот. Логируем и продолжаем.
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ [process] unhandledRejection (бот продолжает работу):', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ [process] uncaughtException (бот продолжает работу):', err?.message || err);
+});
+
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,                        // до 10 параллельных соединений
+  idleTimeoutMillis: 30000,       // закрывать простаивающие через 30с
+  connectionTimeoutMillis: 10000, // таймаут на получение соединения
+  keepAlive: true,                // TCP keep-alive против разрывов
+});
+
+// КРИТИЧНО: без этого обработчика разрыв соединения крашит весь процесс
+// (Unhandled 'error' event). Pool сам переподключится к следующему запросу.
+db.on('error', (err) => {
+  console.error('⚠️ [db pool] ошибка соединения (не критично, пул переподключится):', err.message);
+});
+
 
 async function initDB() {
   await db.query(`
@@ -136,27 +158,20 @@ async function initDB() {
 
 // Флаг готовности БД — маршруты возвращают 503 пока БД не поднялась
 let dbReady = false;
-let dbConnected = false;   // клиент уже физически подключён (connect() вызывать нельзя повторно)
 
 async function connectDB(attempt = 1) {
   try {
-    // db.connect() можно вызвать ТОЛЬКО ОДИН раз на клиента.
-    // Повторный вызов кидает "Client has already been connected".
-    if (!dbConnected) {
-      await db.connect();
-      dbConnected = true;
-      console.log('✅ PostgreSQL подключён');
-    }
-    // initDB может падать отдельно (миграции) — повторяем только её, без reconnect
+    // Pool подключается лениво. Проверяем доступность простым запросом.
+    await db.query('SELECT 1');
+    console.log('✅ PostgreSQL подключён (Pool)');
     await initDB();
     dbReady = true;
     console.log('✅ БД готова к работе');
   } catch (err) {
     const delay = Math.min(attempt * 2000, 30000);
-    // Показываем ПОЛНУЮ ошибку (stack) — чтобы видеть, на какой миграции падает
     console.error(`❌ Ошибка инициализации БД (попытка ${attempt}):`, err.message);
     if (err.stack) console.error(err.stack.split('\n').slice(0, 4).join('\n'));
-    console.log(`🔄 Повтор initDB через ${delay / 1000} сек...`);
+    console.log(`🔄 Повтор через ${delay / 1000} сек...`);
     setTimeout(() => connectDB(attempt + 1), delay);
   }
 }
