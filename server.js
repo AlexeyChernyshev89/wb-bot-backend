@@ -2048,6 +2048,104 @@ async function tgApi(method, data) {
   return res.data;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// АВТОПОСТИНГ В КАНАЛ
+// ═══════════════════════════════════════════════════════════════════════════════
+// Канал задаётся переменной BOT_CHANNEL_ID (@username канала или числовой -100...).
+// Бот должен быть администратором канала с правом публикации.
+const BOT_CHANNEL_ID = process.env.BOT_CHANNEL_ID || null;
+
+/** Публикация поста в канал бота */
+async function postToChannel(text) {
+  if (!BOT_CHANNEL_ID) return;   // канал не настроен — молча пропускаем
+  try {
+    await tgApi('sendMessage', {
+      chat_id: BOT_CHANNEL_ID,
+      text,
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true,
+    });
+    console.log('[channel] ✅ пост опубликован');
+  } catch (e) {
+    console.warn('[channel] не удалось опубликовать:', e.message);
+  }
+}
+
+// ── Еженедельная статистика перемещений ─────────────────────────────────────────
+let lastWeeklyStatsAt = 0;
+async function maybePostWeeklyStats() {
+  if (!BOT_CHANNEL_ID || !dbReady) return;
+  const now = Date.now();
+  const WEEK = 7 * 24 * 60 * 60 * 1000;
+  // Постим раз в неделю (по понедельникам ~10:00 МСК, но не чаще раза в неделю)
+  const d = new Date();
+  const isMonday10 = d.getUTCDay() === 1 && d.getUTCHours() === 7;  // 10:00 МСК = 07:00 UTC
+  if (!isMonday10) return;
+  if (now - lastWeeklyStatsAt < WEEK - 3600000) return;  // защита от двойного поста
+
+  try {
+    // Считаем перемещённое за последние 7 дней
+    const stats = await db.query(
+      `SELECT COALESCE(SUM(moved),0) AS total_moved,
+              COUNT(*) FILTER (WHERE status='done') AS done_count
+       FROM transfer_requests
+       WHERE updated_at >= NOW() - INTERVAL '7 days' AND moved > 0`
+    );
+    const totalMoved = Number(stats.rows[0]?.total_moved || 0);
+    const doneCount  = Number(stats.rows[0]?.done_count || 0);
+    if (totalMoved === 0) return;  // нечего постить
+
+    lastWeeklyStatsAt = now;
+    await postToChannel(
+      `📊 *Статистика за неделю*\n\n` +
+      `✅ Выполнено перемещений: *${doneCount}*\n` +
+      `📦 Перемещено товаров: *${totalMoved.toLocaleString('ru')} шт*\n\n` +
+      `Автобронь работает круглосуточно 🚀\n` +
+      `Всего 1₽ за перемещение 1 товара!`
+    );
+  } catch (e) {
+    console.warn('[channel] ошибка статистики:', e.message);
+  }
+}
+
+// ── Оповещение об открытии квот на ключевые склады ──────────────────────────────
+const KEY_WAREHOUSES = ['Коледино', 'Краснодар', 'Казань', 'Электросталь', 'Екатеринбург'];
+const quotaOpenState = {};   // { склад: true/false } — было ли открыто в прошлой проверке
+let lastQuotaCheckAt = 0;
+
+async function maybePostQuotaOpen(quotas) {
+  if (!BOT_CHANNEL_ID || !Array.isArray(quotas)) return;
+  const now = Date.now();
+  // Проверяем не чаще раза в 10 минут (чтобы не спамить)
+  if (now - lastQuotaCheckAt < 10 * 60 * 1000) return;
+  lastQuotaCheckAt = now;
+
+  for (const keyWh of KEY_WAREHOUSES) {
+    // Ищем квоту склада (по вхождению имени — «Казань: Питание» тоже подойдёт)
+    const q = quotas.find(x => {
+      const nm = (x.displayName || x.officeName || '');
+      return nm.toLowerCase().includes(keyWh.toLowerCase());
+    });
+    const isOpen = q && (q.srcQuota > 0 || q.dstQuota > 0);
+    const wasOpen = quotaOpenState[keyWh] || false;
+
+    // Постим ТОЛЬКО при переходе закрыто→открыто (чтобы не спамить каждый цикл)
+    if (isOpen && !wasOpen) {
+      const parts = [];
+      if (q.srcQuota > 0) parts.push(`отгрузка ${q.srcQuota}`);
+      if (q.dstQuota > 0) parts.push(`приёмка ${q.dstQuota}`);
+      await postToChannel(
+        `⚡️ *Открылись квоты!*\n\n` +
+        `🏭 Склад: *${keyWh}*\n` +
+        `📥 Доступно: ${parts.join(', ')}\n\n` +
+        `Успейте создать заявку на перемещение 🚀`
+      );
+    }
+    quotaOpenState[keyWh] = isOpen;
+  }
+}
+
+
 /**
  * Настройка бота при старте:
  * - регистрирует webhook URL
@@ -2120,6 +2218,9 @@ async function transferWorker() {
   if (!dbReady) return;
   if (workerRunning) { console.log('[worker] Предыдущий цикл ещё выполняется, пропускаем'); return; }
   workerRunning = true;
+
+  // Автопостинг еженедельной статистики (проверка времени внутри)
+  maybePostWeeklyStats().catch(() => {});
 
   try {
     // Берём pending-заявки. Требуется только живая сессия (SMS), wb_token НЕ обязателен —
@@ -2387,6 +2488,8 @@ async function executeRedistribution(wbToken, req) {
   try {
     quotas = await getTransferAvailableLimits(sessionToken, req.sku, sessionCookies);
     console.log(`[worker] AvailableLimits: ${quotas.length} складов с квотами`);
+    // Автопостинг в канал при открытии квот на ключевые склады (throttle внутри)
+    maybePostQuotaOpen(quotas).catch(() => {});
   } catch (err) {
     if (err.sessionExpired) {
       const e = new Error('Сессия обновляется, повтор. Если повторяется долго — авторизуйтесь через SMS.');
