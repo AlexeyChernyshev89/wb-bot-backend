@@ -2030,24 +2030,28 @@ app.post('/webhook', async (req, res) => {
           }
         });
       } else if (text === '/teststats' && chatId === 285237021) {
-        // Тестовый пост статистики в канал (только владелец)
-        await postToChannel(
+        const r = await postToChannel(
           `📊 *Статистика за неделю* (тест)\n\n` +
           `✅ Выполнено перемещений: *12*\n` +
           `📦 Перемещено товаров: *340 шт*\n\n` +
           `Автобронь работает круглосуточно 🚀\n` +
           `Всего 1₽ за перемещение 1 товара!`
         );
-        await tgApi('sendMessage', { chat_id: chatId, text: '✅ Тестовый пост статистики отправлен в канал.' });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: r.ok ? '✅ Пост статистики опубликован в канале!' : `❌ Ошибка: ${r.error}\n\nchat_id=${process.env.BOT_CHANNEL_ID || 'НЕ ЗАДАН'}`
+        });
       } else if (text === '/testquota' && chatId === 285237021) {
-        // Тестовый пост про открытие квоты (только владелец)
-        await postToChannel(
+        const r = await postToChannel(
           `⚡️ *Открылись квоты!* (тест)\n\n` +
           `🏭 Склад: *Коледино*\n` +
           `📥 Доступно: отгрузка 5000, приёмка 8355\n\n` +
           `Успейте создать заявку на перемещение 🚀`
         );
-        await tgApi('sendMessage', { chat_id: chatId, text: '✅ Тестовый пост про квоты отправлен в канал.' });
+        await tgApi('sendMessage', {
+          chat_id: chatId,
+          text: r.ok ? '✅ Пост про квоты опубликован в канале!' : `❌ Ошибка: ${r.error}\n\nchat_id=${process.env.BOT_CHANNEL_ID || 'НЕ ЗАДАН'}`
+        });
       }
     }
   } catch (err) {
@@ -2076,17 +2080,28 @@ const BOT_CHANNEL_ID = process.env.BOT_CHANNEL_ID || null;
 
 /** Публикация поста в канал бота */
 async function postToChannel(text) {
-  if (!BOT_CHANNEL_ID) return;   // канал не настроен — молча пропускаем
+  if (!BOT_CHANNEL_ID) {
+    console.warn('[channel] BOT_CHANNEL_ID не задан');
+    return { ok: false, error: 'BOT_CHANNEL_ID не задан в Variables' };
+  }
   try {
-    await tgApi('sendMessage', {
+    const resp = await tgApi('sendMessage', {
       chat_id: BOT_CHANNEL_ID,
       text,
       parse_mode: 'Markdown',
       disable_web_page_preview: true,
     });
-    console.log('[channel] ✅ пост опубликован');
+    // Telegram возвращает {ok: false, description: "..."} при ошибке прав/chat_id
+    if (resp && resp.ok === false) {
+      console.warn(`[channel] Telegram отклонил: ${resp.description} (chat_id=${BOT_CHANNEL_ID})`);
+      return { ok: false, error: resp.description };
+    }
+    console.log('[channel] ✅ пост опубликован в', BOT_CHANNEL_ID);
+    return { ok: true };
   } catch (e) {
-    console.warn('[channel] не удалось опубликовать:', e.message);
+    const tgErr = e.response?.data?.description || e.message;
+    console.warn(`[channel] не удалось опубликовать: ${tgErr} (chat_id=${BOT_CHANNEL_ID})`);
+    return { ok: false, error: tgErr };
   }
 }
 
