@@ -1156,14 +1156,60 @@ async function loadList() {
   }
 }
 
-function statusBadge(s) {
+function statusBadge(s, st) {
   const m = {
     pending: ['badge-pending', '⏳ Ожидает'],
     done:    ['badge-done',    '✅ Выполнен'],
     failed:  ['badge-failed',  '❌ Ошибка']
   };
-  const [cls, lbl] = m[s] || ['badge-pending', s];
+  let [cls, lbl] = m[s] || ['badge-pending', s];
+  // Уточняем формулировку для ожидающих заявок
+  if (s === 'pending' && st) {
+    if (/квоты отгрузки/i.test(st.text))      lbl = '⏳ Ожидаем квоту отгрузки';
+    else if (/приёмки/i.test(st.text))        lbl = '⏳ Ожидаем приёмку';
+    else if (st.kind === 'warn')              { cls = 'badge-failed'; lbl = '⚠️ Требует внимания'; }
+  }
   return `<span class="badge ${cls}">${lbl}</span>`;
+}
+
+/**
+ * Превращает техническое error_message в понятный статус.
+ * Возвращает { text, kind }: kind = 'wait' (норма, ждём) | 'warn' | 'error'.
+ */
+function humanStatus(r) {
+  const raw = (r.error_message || '').trim();
+  if (!raw) {
+    return r.status === 'pending'
+      ? { text: 'В очереди — проверяем условия перемещения', kind: 'wait' }
+      : null;
+  }
+  // Убираем технический префикс «409:» / «502:» и хвост «(попытка N)»
+  const msg = raw.replace(/^\d{3}:\s*/, '').replace(/\s*\(попытка\s*\d+\)\s*$/i, '').trim();
+
+  // Квота отгрузки закрыта — это НОРМАЛЬНОЕ ожидание, не ошибка
+  const srcClosed = msg.match(/Квота отгрузки со склада «([^»]+)»/i);
+  if (srcClosed) {
+    return { text: `Ожидаем открытия квоты отгрузки — склад «${srcClosed[1]}»`, kind: 'wait' };
+  }
+  // Склад назначения не принимает
+  const dstClosed = msg.match(/(склад назначения|приёмк|dstQuota)/i);
+  if (dstClosed) {
+    return { text: `Ожидаем открытия приёмки на складе «${r.to_warehouse}»`, kind: 'wait' };
+  }
+  // Недостаток остатков
+  if (/только \d+ шт|недостат|остатк/i.test(msg)) {
+    return { text: msg, kind: 'warn' };
+  }
+  // Ограничение по типу поставки (Монопаллета, правила WB)
+  if (/монопаллет|тип поставки|Короб|ограничени/i.test(msg)) {
+    return { text: msg, kind: 'warn' };
+  }
+  // Сессия
+  if (/сесси|авториз|SMS/i.test(msg)) {
+    return { text: msg, kind: 'warn' };
+  }
+  // Всё остальное — как есть
+  return { text: msg, kind: r.status === 'pending' ? 'wait' : 'error' };
 }
 
 function renderTransfers() {
@@ -1177,10 +1223,13 @@ function renderTransfers() {
     const d = new Date(r.created_at);
     const date = `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
     const retryHtml = r.retry_count > 0
-      ? `<div style="font-size:11px;color:var(--warning);margin-top:3px">🔄 Попыток: ${r.retry_count}${r.next_retry_at ? ' · след: ' + new Date(r.next_retry_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : ''}</div>`
+      ? `<div style="font-size:11px;color:var(--text2);margin-top:3px">🔄 Проверок: ${r.retry_count}${r.next_retry_at ? ' · след: ' + new Date(r.next_retry_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : ''}</div>`
       : '';
-    const errHtml = r.error_message
-      ? `<div style="font-size:11px;color:var(--danger);margin-top:3px;word-break:break-word">⚠️ ${r.error_message}</div>`
+    const st = humanStatus(r);
+    const stColor = st ? ({ wait: 'var(--accent)', warn: 'var(--warning)', error: 'var(--danger)' }[st.kind]) : '';
+    const stIcon  = st ? ({ wait: '⏳', warn: '⚠️', error: '❌' }[st.kind]) : '';
+    const errHtml = st
+      ? `<div style="font-size:12px;color:${stColor};margin-top:4px;word-break:break-word;line-height:1.4">${stIcon} ${escHtml(st.text)}</div>`
       : '';
     return `
     <div class="transfer-row">
@@ -1197,7 +1246,7 @@ function renderTransfers() {
         <div class="tr-meta" style="flex:1;min-width:0">
           Арт: <b>${r.sku}</b> &nbsp; Кол-во: <b>${r.amount}</b>
           ${r.product_name ? `<div style="font-size:13px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.product_name)}</div>` : ''}
-          <div style="margin-top:4px">${statusBadge(r.status)}</div>
+          <div style="margin-top:4px">${statusBadge(r.status, st)}</div>
           ${retryHtml}${errHtml}
         </div>
         <div class="tr-actions">
@@ -1508,9 +1557,15 @@ function buildFromDrop(warehouses) {
     drop.innerHTML = '<div class="dropdown-item" style="color:var(--text2)">Нет остатков ни на одном складе</div>';
     return;
   }
-  drop.innerHTML = warehouses.map(w =>
-    `<div class="dropdown-item" onclick="selectFrom('${w.name}',${w.amount})">${w.name} (${w.amount})</div>`
-  ).join('');
+  drop.innerHTML = warehouses.map(w => {
+    if (w.blocked) {
+      // Склад с остатком, но WB не даёт с него перемещать — показываем с пояснением
+      return `<div class="dropdown-item" style="opacity:.5;cursor:not-allowed"
+        onclick="alert('${escHtml(w.reason || 'Перемещение с этого склада недоступно')}')">
+        ${escHtml(w.name)} (${w.amount}) · 🚫 недоступен</div>`;
+    }
+    return `<div class="dropdown-item" onclick="selectFrom('${w.name}',${w.amount})">${escHtml(w.name)} (${w.amount})</div>`;
+  }).join('');
 }
 
 function selectFrom(name, amount) {
