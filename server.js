@@ -621,6 +621,27 @@ app.post('/transfers/create', telegramAuth, requireDB, async (req, res) => {
   }
 
   try {
+    // Блокировка ДУБЛЯ: не создаём вторую активную заявку на ту же связку
+    // (товар + склад-источник + склад-назначение) — иначе списывается двойной резерв
+    // и обе заявки конкурируют за одну квоту.
+    const dupRes = await db.query(
+      `SELECT id FROM transfer_requests
+       WHERE user_id=$1 AND sku=$2 AND from_warehouse=$3 AND to_warehouse=$4
+         AND status='pending'
+       LIMIT 1`,
+      [req.telegramId, String(sku), from_warehouse, to_warehouse]
+    );
+    if (dupRes.rows.length > 0) {
+      return res.status(409).json({
+        error: 'duplicate_request',
+        message: `Запрос на перемещение товара уже создан (заявка #${dupRes.rows[0].id}). Отредактируйте существующую заявку или удалите её, чтобы создать новую.`,
+      });
+    }
+  } catch (e) {
+    console.warn('[create] не удалось проверить дубль:', e.message);
+  }
+
+  try {
     // Блокировка повтора в течение 72ч: WB не двигает ту же пару (товар + склад-источник)
     // раньше чем через 72 часа после успешного перемещения.
     const blockRes = await db.query(
@@ -2029,18 +2050,35 @@ app.post('/webhook', async (req, res) => {
             inline_keyboard: [[{ text: '💬 Написать в поддержку', url: 'https://t.me/Chernyshevofficial' }]]
           }
         });
-      } else if (text === '/teststats' && chatId === 285237021) {
+      } else if (text === '/welcome' && chatId === 285237021) {
+        // Публикация приветственного поста в канал (закрепить вручную после отправки)
         const r = await postToChannel(
-          `📊 *Статистика за неделю* (тест)\n\n` +
-          `✅ Выполнено перемещений: *12*\n` +
-          `📦 Перемещено товаров: *340 шт*\n\n` +
-          `Автобронь работает круглосуточно 🚀\n` +
-          `Всего 1₽ за перемещение 1 товара!`
+          `👋 *Добро пожаловать в канал WB_Logistic_bot!*\n\n` +
+          `Здесь публикуем новости сервиса, статистику перемещений и оповещения об открытии квот на ключевых складах WB.\n\n` +
+          `📦 *Что делает бот*\n` +
+          `Автоматически перемещает ваши остатки между складами Wildberries. Вы создаёте заявку — бот круглосуточно ловит открытие квоты и выполняет перемещение сам.\n\n` +
+          `💰 *Стоимость — всего 1 рубль за перемещение 1 товара.*\n\n` +
+          `⚡️ *Скорость* — бот проверяет квоты каждые 10 секунд и занимает слот быстрее, чем это возможно вручную.\n\n` +
+          `🔒 *Защита персональных данных* — доступ к кабинету используется только для выполнения ваших заявок на перемещение. Данные не передаются третьим лицам.\n\n` +
+          `📄 *Подтверждение* — после каждого перемещения вы скачиваете официальную накладную от WB.\n\n` +
+          `👉 Начать: @WB_Logistic_bot`
         );
         await tgApi('sendMessage', {
           chat_id: chatId,
-          text: r.ok ? '✅ Пост статистики опубликован в канале!' : `❌ Ошибка: ${r.error}\n\nchat_id=${process.env.BOT_CHANNEL_ID || 'НЕ ЗАДАН'}`
+          text: r.ok ? '✅ Приветственный пост опубликован. Не забудьте закрепить его в канале.' : `❌ Ошибка: ${r.error}`
         });
+      } else if (text === '/teststats' && chatId === 285237021) {
+        // Публикация реальной накопительной статистики (тест/ручной запуск)
+        const statsText = await buildStatsPost();
+        if (!statsText) {
+          await tgApi('sendMessage', { chat_id: chatId, text: 'ℹ️ Пока нет выполненных перемещений — статистику публиковать рано.' });
+        } else {
+          const r = await postToChannel(statsText);
+          await tgApi('sendMessage', {
+            chat_id: chatId,
+            text: r.ok ? '✅ Статистика опубликована в канале.' : `❌ Ошибка: ${r.error}`
+          });
+        }
       } else if (text === '/testquota' && chatId === 285237021) {
         const r = await postToChannel(
           `⚡️ *Открылись квоты!* (тест)\n\n` +
@@ -2105,38 +2143,58 @@ async function postToChannel(text) {
   }
 }
 
-// ── Еженедельная статистика перемещений ─────────────────────────────────────────
+// ── Статистика перемещений (накопительный итог за всё время) ────────────────────
 let lastWeeklyStatsAt = 0;
+async function buildStatsPost() {
+  // Накопительный итог за ВСЁ время работы + прирост за неделю.
+  // Только реальные данные из БД — цифры должны сходиться с фактом.
+  const total = await db.query(
+    `SELECT COALESCE(SUM(moved),0) AS moved_total,
+            COUNT(*) FILTER (WHERE status='done') AS done_total,
+            COUNT(DISTINCT from_warehouse) FILTER (WHERE moved > 0) AS wh_from,
+            COUNT(DISTINCT to_warehouse)   FILTER (WHERE moved > 0) AS wh_to
+     FROM transfer_requests`
+  );
+  const week = await db.query(
+    `SELECT COALESCE(SUM(moved),0) AS moved_week
+     FROM transfer_requests
+     WHERE updated_at >= NOW() - INTERVAL '7 days' AND moved > 0`
+  );
+  const movedTotal = Number(total.rows[0]?.moved_total || 0);
+  const doneTotal  = Number(total.rows[0]?.done_total  || 0);
+  const movedWeek  = Number(week.rows[0]?.moved_week   || 0);
+  // Уникальные склады, задействованные в перемещениях (объединяем источники и приёмники)
+  const whCount = Math.max(Number(total.rows[0]?.wh_from || 0), Number(total.rows[0]?.wh_to || 0));
+
+  if (movedTotal === 0) return null;
+
+  let text =
+    `📊 *Итоги работы WB_Logistic_bot*\n\n` +
+    `✅ Всего выполнено перемещений: *${doneTotal.toLocaleString('ru')}*\n` +
+    `📦 Всего перемещено товаров: *${movedTotal.toLocaleString('ru')} шт*\n`;
+  if (whCount > 0) text += `🏭 Задействовано складов WB: *${whCount}*\n`;
+  if (movedWeek > 0) text += `\n📈 За последнюю неделю: *${movedWeek.toLocaleString('ru')} шт*\n`;
+  text +=
+    `\nАвтобронь работает круглосуточно 🚀\n` +
+    `Всего 1₽ за перемещение 1 товара!\n\n` +
+    `👉 @WB_Logistic_bot`;
+  return text;
+}
+
 async function maybePostWeeklyStats() {
   if (!BOT_CHANNEL_ID || !dbReady) return;
   const now = Date.now();
   const WEEK = 7 * 24 * 60 * 60 * 1000;
-  // Постим раз в неделю (по понедельникам ~10:00 МСК, но не чаще раза в неделю)
   const d = new Date();
   const isMonday10 = d.getUTCDay() === 1 && d.getUTCHours() === 7;  // 10:00 МСК = 07:00 UTC
   if (!isMonday10) return;
   if (now - lastWeeklyStatsAt < WEEK - 3600000) return;  // защита от двойного поста
 
   try {
-    // Считаем перемещённое за последние 7 дней
-    const stats = await db.query(
-      `SELECT COALESCE(SUM(moved),0) AS total_moved,
-              COUNT(*) FILTER (WHERE status='done') AS done_count
-       FROM transfer_requests
-       WHERE updated_at >= NOW() - INTERVAL '7 days' AND moved > 0`
-    );
-    const totalMoved = Number(stats.rows[0]?.total_moved || 0);
-    const doneCount  = Number(stats.rows[0]?.done_count || 0);
-    if (totalMoved === 0) return;  // нечего постить
-
+    const text = await buildStatsPost();
+    if (!text) return;   // нечего постить
     lastWeeklyStatsAt = now;
-    await postToChannel(
-      `📊 *Статистика за неделю*\n\n` +
-      `✅ Выполнено перемещений: *${doneCount}*\n` +
-      `📦 Перемещено товаров: *${totalMoved.toLocaleString('ru')} шт*\n\n` +
-      `Автобронь работает круглосуточно 🚀\n` +
-      `Всего 1₽ за перемещение 1 товара!`
-    );
+    await postToChannel(text);
   } catch (e) {
     console.warn('[channel] ошибка статистики:', e.message);
   }
