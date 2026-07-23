@@ -2053,7 +2053,7 @@ app.post('/webhook', async (req, res) => {
       } else if (text === '/welcome' && chatId === 285237021) {
         // Публикация приветственного поста в канал (закрепить вручную после отправки)
         const r = await postToChannel(
-          `👋 *Добро пожаловать в канал WB_Logistic_bot!*\n\n` +
+          `👋 *Добро пожаловать в канал WB\\_Logistic\\_bot!*\n\n` +
           `Здесь публикуем новости сервиса, статистику перемещений и оповещения об открытии квот на ключевых складах WB.\n\n` +
           `📦 *Что делает бот*\n` +
           `Автоматически перемещает ваши остатки между складами Wildberries. Вы создаёте заявку — бот круглосуточно ловит открытие квоты и выполняет перемещение сам.\n\n` +
@@ -2061,7 +2061,7 @@ app.post('/webhook', async (req, res) => {
           `⚡️ *Скорость* — бот проверяет квоты каждые 10 секунд и занимает слот быстрее, чем это возможно вручную.\n\n` +
           `🔒 *Защита персональных данных* — доступ к кабинету используется только для выполнения ваших заявок на перемещение. Данные не передаются третьим лицам.\n\n` +
           `📄 *Подтверждение* — после каждого перемещения вы скачиваете официальную накладную от WB.\n\n` +
-          `👉 Начать: @WB_Logistic_bot`
+          `👉 Начать: @WB\\_Logistic\\_help\\_bot`
         );
         await tgApi('sendMessage', {
           chat_id: chatId,
@@ -2169,7 +2169,7 @@ async function buildStatsPost() {
   if (movedTotal === 0) return null;
 
   let text =
-    `📊 *Итоги работы WB_Logistic_bot*\n\n` +
+    `📊 *Итоги работы WB\\_Logistic\\_bot*\n\n` +
     `✅ Всего выполнено перемещений: *${doneTotal.toLocaleString('ru')}*\n` +
     `📦 Всего перемещено товаров: *${movedTotal.toLocaleString('ru')} шт*\n`;
   if (whCount > 0) text += `🏭 Задействовано складов WB: *${whCount}*\n`;
@@ -2177,7 +2177,7 @@ async function buildStatsPost() {
   text +=
     `\nАвтобронь работает круглосуточно 🚀\n` +
     `Всего 1₽ за перемещение 1 товара!\n\n` +
-    `👉 @WB_Logistic_bot`;
+    `👉 @WB\\_Logistic\\_help\\_bot`;
   return text;
 }
 
@@ -2293,9 +2293,21 @@ async function setupBot() {
 
 const WORKER_INTERVAL    = 10_000;  // 10 сек между циклами
 const API_DELAY          = 300;     // 300 мс между запросами к WB API (≤300 req/min)
-const RETRY_409_DELAY    = 30_000;       // 30 сек — как у конкурентов (мониторинг слотов)
+const RETRY_409_MIN      = 12_000;  // минимум 12 сек между проверками одной заявки
+const RETRY_409_MAX      = 40_000;  // максимум 40 сек (при большой очереди)
 const RETRY_UNKNOWN_DELAY= 60_000;  // 60 сек повтор при неизвестной ошибке
-const MAX_RETRY_COUNT    = 11520;   // 11520 × 30 сек = 96 часов
+// Заявка отменяется по возрасту (96ч от создания), см. обработчик 409 ниже.
+
+// Адаптивный интервал повтора: чем больше активных заявок, тем реже проверяем каждую,
+// чтобы суммарно не превысить лимит WB (300 запросов/мин на аккаунт).
+// На заявку за проверку уходит ~2 запроса (transfer/list + AvailableLimits).
+// Формула: интервал = clamp(число_заявок × 2.5 сек, MIN, MAX).
+// 1-4 заявки → 12с (быстро!), 8 заявок → 20с, 16+ заявок → 40с (безопасно).
+let currentQueueSize = 1;
+function getRetry409Delay() {
+  const d = currentQueueSize * 2500;
+  return Math.min(Math.max(d, RETRY_409_MIN), RETRY_409_MAX);
+}
 
 let workerRunning = false;
 const userRateLimits = {};  // { telegramId → timestamp до которого нельзя делать запросы }
@@ -2319,7 +2331,7 @@ async function transferWorker() {
     // перемещение работает на session-токене + supplier id (как у конкурента, только SMS).
     const { rows } = await db.query(`
       SELECT tr.id, tr.user_id, tr.from_warehouse, tr.to_warehouse,
-             tr.sku, tr.amount, tr.retry_count, tr.moved, tr.product_name,
+             tr.sku, tr.amount, tr.retry_count, tr.moved, tr.product_name, tr.created_at,
              u.wb_token
       FROM   transfer_requests tr
       JOIN   users u ON u.telegram_id = tr.user_id
@@ -2331,7 +2343,8 @@ async function transferWorker() {
     `);
 
     if (!rows.length) return;
-    console.log(`[worker] Цикл: ${rows.length} заявок в очереди`);
+    currentQueueSize = rows.length;   // для адаптивного интервала повтора
+    console.log(`[worker] Цикл: ${rows.length} заявок в очереди (интервал повтора ~${Math.round(getRetry409Delay()/1000)}с)`);
 
     // Параллельная обработка всех заявок одновременно (как у конкурента)
     // Максимум 3 заявки на пользователя за цикл чтобы не перегружать
@@ -2372,7 +2385,7 @@ async function processRequest(req) {
     // Если result пустой/без wasMoved — это НЕ успех (защита от ложных «выполнена»).
     if (!result || typeof result.wasMoved !== 'number' || result.wasMoved <= (req.moved || 0)) {
       // Перемещение не подтверждено — повторяем, НЕ уведомляем об успехе
-      const nextRetry = new Date(Date.now() + RETRY_409_DELAY);
+      const nextRetry = new Date(Date.now() + getRetry409Delay());
       const newCount  = req.retry_count + 1;
       await db.query(
         `UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4`,
@@ -2408,7 +2421,7 @@ async function processRequest(req) {
     } else {
       // ⏳ Частично перемещено — сохраняем прогресс, продолжаем ловить квоту
       const justMoved = result.moved || 0;
-      const nextRetry = new Date(Date.now() + RETRY_409_DELAY);
+      const nextRetry = new Date(Date.now() + getRetry409Delay());
       await db.query(
         `UPDATE transfer_requests SET moved=\$2, next_retry_at=\$3, error_message=\$4, updated_at=NOW() WHERE id=\$1`,
         [req.id, wasMoved, nextRetry, `Перемещено ${wasMoved} из ${total}, ждём квоту на остаток`]
@@ -2434,14 +2447,18 @@ async function processRequest(req) {
 
     } else if (status === 409) {
       // Временное препятствие (нет квоты / мало остатка / склад не принимает) — повтор
-      const nextRetry = new Date(Date.now() + RETRY_409_DELAY);
+      const nextRetry = new Date(Date.now() + getRetry409Delay());
       const newCount  = req.retry_count + 1;
-      if (newCount >= MAX_RETRY_COUNT) {
+      // Отменяем по ВОЗРАСТУ заявки (96ч от создания), а не по числу попыток —
+      // интервал теперь адаптивный, поэтому счётчик попыток неточен как мера времени.
+      const ageMs = Date.now() - new Date(req.created_at || Date.now()).getTime();
+      const MAX_AGE_MS = 96 * 60 * 60 * 1000;  // 96 часов
+      if (ageMs >= MAX_AGE_MS) {
         await db.query(
           `UPDATE transfer_requests SET status='failed', error_message=\$1, updated_at=NOW() WHERE id=\$2`,
-          [wbDetail || 'Перемещение недоступно 24+ часа подряд', req.id]
+          [wbDetail || 'Перемещение недоступно 96 часов подряд', req.id]
         );
-        await notifyUser(req.user_id, `❌ Заявка отменена: ${wbDetail || 'условия не выполнились за 24 часа'}`, req);
+        await notifyUser(req.user_id, `❌ Заявка отменена: ${wbDetail || 'условия не выполнились за 96 часов'}`, req);
       } else {
         await db.query(
           `UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4`,
