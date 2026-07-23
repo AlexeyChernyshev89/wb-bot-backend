@@ -1,4 +1,4 @@
-// server.js — WB_Logistic_bot Backend
+// server.js — WB_Logistic_help_bot Backend
 // Авторизация продавца: Bearer API-токен из ЛК Wildberries
 // Telegram Mini App: валидация initData через @telegram-apps/init-data-node
 
@@ -1750,7 +1750,7 @@ app.post('/payments/create', telegramAuth, requireDB, async (req, res) => {
         return_url: `${APP_URL}/?payment=success`,
       },
       capture: true,
-      description: `WB_Logistic_bot: ${units} единиц перемещений`,
+      description: `WB_Logistic_help_bot: ${units} единиц перемещений`,
       metadata: {
         telegram_id: String(req.telegramId),
         units:       String(units),
@@ -2031,7 +2031,7 @@ app.post('/webhook', async (req, res) => {
       if (text.startsWith('/start')) {
         await tgApi('sendMessage', {
           chat_id: chatId,
-          text: '👋 Добро пожаловать в *WB\\_Logistic\\_bot*\n\nАвтоматизация перераспределения остатков товаров между складами Wildberries\\.\n\n🔥 *Уважаемые пользователи, до сентября 2026 у нас низкая цена\\! Всего 1 рубль за перемещение 1 товара\\!*\n\nНажмите кнопку ниже, чтобы открыть приложение:',
+          text: '👋 Добро пожаловать в *WB\\_Logistic\\_help\\_bot*\n\nАвтоматизация перераспределения остатков товаров между складами Wildberries\\.\n\n🔥 *Уважаемые пользователи, до сентября 2026 у нас низкая цена\\! Всего 1 рубль за перемещение 1 товара\\!*\n\nНажмите кнопку ниже, чтобы открыть приложение:',
           parse_mode: 'MarkdownV2',
           reply_markup: {
             inline_keyboard: [
@@ -2044,7 +2044,7 @@ app.post('/webhook', async (req, res) => {
       } else if (text === '/support') {
         await tgApi('sendMessage', {
           chat_id: chatId,
-          text: '💬 Служба поддержки WB\\_Logistic\\_bot\n\nПо всем вопросам обращайтесь к @Chernyshevofficial',
+          text: '💬 Служба поддержки WB\\_Logistic\\_help\\_bot\n\nПо всем вопросам обращайтесь к @Chernyshevofficial',
           parse_mode: 'MarkdownV2',
           reply_markup: {
             inline_keyboard: [[{ text: '💬 Написать в поддержку', url: 'https://t.me/Chernyshevofficial' }]]
@@ -2053,7 +2053,7 @@ app.post('/webhook', async (req, res) => {
       } else if (text === '/welcome' && chatId === 285237021) {
         // Публикация приветственного поста в канал (закрепить вручную после отправки)
         const r = await postToChannel(
-          `👋 *Добро пожаловать в канал WB\\_Logistic\\_bot!*\n\n` +
+          `👋 *Добро пожаловать в канал WB\\_Logistic\\_help\\_bot!*\n\n` +
           `Здесь публикуем новости сервиса, статистику перемещений и оповещения об открытии квот на ключевых складах WB.\n\n` +
           `📦 *Что делает бот*\n` +
           `Автоматически перемещает ваши остатки между складами Wildberries. Вы создаёте заявку — бот круглосуточно ловит открытие квоты и выполняет перемещение сам.\n\n` +
@@ -2169,7 +2169,7 @@ async function buildStatsPost() {
   if (movedTotal === 0) return null;
 
   let text =
-    `📊 *Итоги работы WB\\_Logistic\\_bot*\n\n` +
+    `📊 *Итоги работы WB\\_Logistic\\_help\\_bot*\n\n` +
     `✅ Всего выполнено перемещений: *${doneTotal.toLocaleString('ru')}*\n` +
     `📦 Всего перемещено товаров: *${movedTotal.toLocaleString('ru')} шт*\n`;
   if (whCount > 0) text += `🏭 Задействовано складов WB: *${whCount}*\n`;
@@ -2276,7 +2276,7 @@ async function setupBot() {
     // 3. Устанавливаем команды бота
     await tgApi('setMyCommands', {
       commands: [
-        { command: 'start', description: '🚀 Открыть WB_Logistic_bot' },
+        { command: 'start', description: '🚀 Открыть WB_Logistic_help_bot' },
         { command: 'support', description: '💬 Поддержка' }
       ]
     });
