@@ -2360,28 +2360,47 @@ async function transferWorker() {
   try {
     // Берём pending-заявки. Требуется только живая сессия (SMS), wb_token НЕ обязателен —
     // перемещение работает на session-токене + supplier id (как у конкурента, только SMS).
+    //
+    // ROW_NUMBER() PARTITION BY user_id — КРИТИЧНО для многопользовательского режима:
+    // без него простой ORDER BY created_at + LIMIT приводил к «голоданию» — пользователь
+    // с сотнями старых заявок занимал всю выборку, и заявки остальных не попадали
+    // в цикл вообще. Теперь каждый пользователь гарантированно получает свои слоты.
     const { rows } = await db.query(`
-      SELECT tr.id, tr.user_id, tr.from_warehouse, tr.to_warehouse,
-             tr.sku, tr.amount, tr.retry_count, tr.moved, tr.product_name, tr.created_at,
-             u.wb_token
-      FROM   transfer_requests tr
-      JOIN   users u ON u.telegram_id = tr.user_id
-      WHERE  tr.status = 'pending'
-        AND  u.wb_session_token IS NOT NULL
-        AND  (tr.next_retry_at IS NULL OR tr.next_retry_at <= NOW())
-      ORDER BY tr.created_at ASC
+      SELECT * FROM (
+        SELECT tr.id, tr.user_id, tr.from_warehouse, tr.to_warehouse,
+               tr.sku, tr.amount, tr.retry_count, tr.moved, tr.product_name, tr.created_at,
+               u.wb_token,
+               ROW_NUMBER() OVER (PARTITION BY tr.user_id ORDER BY tr.created_at ASC) AS rn
+        FROM   transfer_requests tr
+        JOIN   users u ON u.telegram_id = tr.user_id
+        WHERE  tr.status = 'pending'
+          AND  u.wb_session_token IS NOT NULL
+          AND  (tr.next_retry_at IS NULL OR tr.next_retry_at <= NOW())
+      ) q
+      WHERE q.rn <= 8
+      ORDER BY q.created_at ASC
       LIMIT  500
     `);
 
     if (!rows.length) { userQueueSizes.clear(); return; }
 
-    // Считаем очередь ПО КАЖДОМУ пользователю — от неё зависит интервал его заявок
+    // Реальный размер очереди КАЖДОГО пользователя считаем отдельным запросом:
+    // выборка выше ограничена 8 заявками на пользователя, поэтому по ней нельзя
+    // судить о нагрузке (у человека может быть 30 заявок, а в rows попадёт 8).
+    // От настоящего размера зависит интервал повтора — иначе он будет занижен.
     userQueueSizes.clear();
-    for (const r of rows) {
-      userQueueSizes.set(r.user_id, (userQueueSizes.get(r.user_id) || 0) + 1);
+    try {
+      const { rows: qs } = await db.query(
+        `SELECT user_id, COUNT(*)::int AS n FROM transfer_requests
+         WHERE status='pending' GROUP BY user_id`
+      );
+      for (const r of qs) userQueueSizes.set(r.user_id, r.n);
+    } catch (e) {
+      // Фолбэк: считаем по выборке (хуже, но не критично)
+      for (const r of rows) userQueueSizes.set(r.user_id, (userQueueSizes.get(r.user_id) || 0) + 1);
     }
     const usersCount = userQueueSizes.size;
-    console.log(`[worker] Цикл: ${rows.length} заявок / ${usersCount} польз. (интервал ~${Math.round(getRetry409Delay(rows[0].user_id) / 1000)}с)`);
+    console.log(`[worker] Цикл: ${rows.length} заявок к обработке / ${usersCount} польз. (интервал ~${Math.round(getRetry409Delay(rows[0].user_id) / 1000)}с)`);
 
     // Параллельная обработка заявок одного цикла.
     // Лимит на пользователя за цикл: WB даёт 300 запросов/мин на аккаунт продавца,
