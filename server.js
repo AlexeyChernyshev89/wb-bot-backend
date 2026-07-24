@@ -2291,21 +2291,42 @@ async function setupBot() {
 // ФОНОВЫЙ ВОРКЕР — автоматическое выполнение заявок на перемещение
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const WORKER_INTERVAL    = 10_000;  // 10 сек между циклами
+const WORKER_INTERVAL    = 5_000;   // 5 сек между циклами (только запрос к своей БД, к WB не ходим)
 const API_DELAY          = 300;     // 300 мс между запросами к WB API (≤300 req/min)
-const RETRY_409_MIN      = 12_000;  // минимум 12 сек между проверками одной заявки
+const RETRY_409_MIN      = 8_000;   // минимум 8 сек между проверками одной заявки
 const RETRY_409_MAX      = 40_000;  // максимум 40 сек (при большой очереди)
 const RETRY_UNKNOWN_DELAY= 60_000;  // 60 сек повтор при неизвестной ошибке
 // Заявка отменяется по возрасту (96ч от создания), см. обработчик 409 ниже.
 
-// Адаптивный интервал повтора: чем больше активных заявок, тем реже проверяем каждую,
-// чтобы суммарно не превысить лимит WB (300 запросов/мин на аккаунт).
-// На заявку за проверку уходит ~2 запроса (transfer/list + AvailableLimits).
-// Формула: интервал = clamp(число_заявок × 2.5 сек, MIN, MAX).
-// 1-4 заявки → 12с (быстро!), 8 заявок → 20с, 16+ заявок → 40с (безопасно).
+// ── Кэш квот на пользователя ────────────────────────────────────────────────────
+// AvailableLimits возвращает квоты по ВСЕМУ аккаунту (тело запроса пустое, артикул
+// не влияет). Раньше запрос уходил для КАЖДОЙ заявки — при 10 заявках это 10
+// одинаковых ответов и впустую сожжённый лимит WB. Теперь запрашиваем один раз и
+// переиспользуем в пределах TTL. Кэшируем сам Promise — тогда параллельные заявки
+// одного цикла дожидаются одного запроса, а не стартуют десять сразу.
+const QUOTA_CACHE_TTL = 5_000;
+const _quotaCache = new Map();   // userId -> { at, promise }
+
+function getQuotasCached(userId, sessionToken, sessionCookies) {
+  const now = Date.now();
+  const hit = _quotaCache.get(userId);
+  if (hit && now - hit.at < QUOTA_CACHE_TTL) return hit.promise;
+
+  const promise = getTransferAvailableLimits(sessionToken, null, sessionCookies)
+    .catch(err => { _quotaCache.delete(userId); throw err; });   // ошибку не кэшируем
+  _quotaCache.set(userId, { at: now, promise });
+  return promise;
+}
+
+// Адаптивный интервал повтора. Лимит WB: 300 запросов/мин на аккаунт продавца
+// (один ответ 409 считается за 5 запросов). После кэширования квот на одну проверку
+// заявки уходит ~1 запрос (transfer/list), квоты — один раз на цикл.
+// Берём вдвое меньший бюджет (≈150/мин) как запас на пользовательские запросы,
+// обновление сессии и прочее: интервал = clamp(число_заявок × 0.8с, MIN, MAX).
+// 1-10 заявок → 8с, 20 → 16с, 30 → 24с, 50+ → 40с.
 let currentQueueSize = 1;
 function getRetry409Delay() {
-  const d = currentQueueSize * 2500;
+  const d = currentQueueSize * 800;
   return Math.min(Math.max(d, RETRY_409_MIN), RETRY_409_MAX);
 }
 
@@ -2346,13 +2367,16 @@ async function transferWorker() {
     currentQueueSize = rows.length;   // для адаптивного интервала повтора
     console.log(`[worker] Цикл: ${rows.length} заявок в очереди (интервал повтора ~${Math.round(getRetry409Delay()/1000)}с)`);
 
-    // Параллельная обработка всех заявок одновременно (как у конкурента)
-    // Максимум 3 заявки на пользователя за цикл чтобы не перегружать
+    // Параллельная обработка заявок одного цикла.
+    // Лимит на пользователя за цикл: WB даёт 300 запросов/мин на аккаунт продавца,
+    // после кэширования квот на заявку уходит ~1 запрос. 8 заявок × 12 циклов/мин
+    // = ~96 запросов + 12 на квоты ≈ 108/мин — с большим запасом под лимит.
+    const PER_USER_PER_CYCLE = 8;
     const perUser = {};
     const toProcess = [];
     for (const req of rows) {
       perUser[req.user_id] = (perUser[req.user_id] || 0) + 1;
-      if (perUser[req.user_id] > 3) continue;
+      if (perUser[req.user_id] > PER_USER_PER_CYCLE) continue;
       const rateUntil = userRateLimits[req.user_id];
       if (rateUntil && Date.now() < rateUntil) {
         console.log(`[worker] User ${req.user_id} rate-limited, пропускаем`);
@@ -2595,7 +2619,7 @@ async function executeRedistribution(wbToken, req) {
   // AvailableLimits возвращает quotas[] с officeID, officeName, srcQuota, dstQuota
   let quotas;
   try {
-    quotas = await getTransferAvailableLimits(sessionToken, req.sku, sessionCookies);
+    quotas = await getQuotasCached(req.user_id, sessionToken, sessionCookies);
     console.log(`[worker] AvailableLimits: ${quotas.length} складов с квотами`);
     // Автопостинг в канал при открытии квот на ключевые склады (throttle внутри)
     maybePostQuotaOpen(quotas).catch(() => {});
