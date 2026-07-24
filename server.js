@@ -53,7 +53,7 @@ process.on('uncaughtException', (err) => {
 
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 10,                        // до 10 параллельных соединений
+  max: 20,                        // до 20 параллельных соединений (запас на рост числа пользователей)
   idleTimeoutMillis: 30000,       // закрывать простаивающие через 30с
   connectionTimeoutMillis: 10000, // таймаут на получение соединения
   keepAlive: true,                // TCP keep-alive против разрывов
@@ -2148,17 +2148,25 @@ let lastWeeklyStatsAt = 0;
 async function buildStatsPost() {
   // Накопительный итог за ВСЁ время работы + прирост за неделю.
   // Только реальные данные из БД — цифры должны сходиться с фактом.
+  //
+  // ВАЖНО: колонка `moved` появилась миграцией позже первых перемещений, поэтому
+  // у старых выполненных заявок она осталась 0. Заявка получает статус 'done'
+  // только когда перемещена ПОЛНОСТЬЮ (wasMoved >= amount), значит для таких строк
+  // фактически перемещено ровно `amount`. Иначе статистика занижает итог.
+  const MOVED_EXPR = `CASE WHEN status='done' THEN GREATEST(COALESCE(moved,0), amount)
+                           ELSE COALESCE(moved,0) END`;
   const total = await db.query(
-    `SELECT COALESCE(SUM(moved),0) AS moved_total,
+    `SELECT COALESCE(SUM(${MOVED_EXPR}),0) AS moved_total,
             COUNT(*) FILTER (WHERE status='done') AS done_total,
-            COUNT(DISTINCT from_warehouse) FILTER (WHERE moved > 0) AS wh_from,
-            COUNT(DISTINCT to_warehouse)   FILTER (WHERE moved > 0) AS wh_to
+            COUNT(DISTINCT from_warehouse) FILTER (WHERE status='done' OR COALESCE(moved,0) > 0) AS wh_from,
+            COUNT(DISTINCT to_warehouse)   FILTER (WHERE status='done' OR COALESCE(moved,0) > 0) AS wh_to
      FROM transfer_requests`
   );
   const week = await db.query(
-    `SELECT COALESCE(SUM(moved),0) AS moved_week
+    `SELECT COALESCE(SUM(${MOVED_EXPR}),0) AS moved_week
      FROM transfer_requests
-     WHERE updated_at >= NOW() - INTERVAL '7 days' AND moved > 0`
+     WHERE updated_at >= NOW() - INTERVAL '7 days'
+       AND (status='done' OR COALESCE(moved,0) > 0)`
   );
   const movedTotal = Number(total.rows[0]?.moved_total || 0);
   const doneTotal  = Number(total.rows[0]?.done_total  || 0);
@@ -2318,15 +2326,17 @@ function getQuotasCached(userId, sessionToken, sessionCookies) {
   return promise;
 }
 
-// Адаптивный интервал повтора. Лимит WB: 300 запросов/мин на аккаунт продавца
-// (один ответ 409 считается за 5 запросов). После кэширования квот на одну проверку
-// заявки уходит ~1 запрос (transfer/list), квоты — один раз на цикл.
-// Берём вдвое меньший бюджет (≈150/мин) как запас на пользовательские запросы,
-// обновление сессии и прочее: интервал = clamp(число_заявок × 0.8с, MIN, MAX).
+// Адаптивный интервал повтора. Лимит WB: 300 запросов/мин НА АККАУНТ ПРОДАВЦА
+// (один ответ 409 считается за 5 запросов). Поэтому считаем нагрузку ПО КАЖДОМУ
+// пользователю отдельно — очередь соседа не должна замедлять твои заявки.
+// После кэширования квот на проверку заявки уходит ~1 запрос (transfer/list).
+// Берём вдвое меньший бюджет (≈150/мин) как запас: интервал = clamp(заявок × 0.8с, MIN, MAX).
 // 1-10 заявок → 8с, 20 → 16с, 30 → 24с, 50+ → 40с.
-let currentQueueSize = 1;
-function getRetry409Delay() {
-  const d = currentQueueSize * 800;
+const userQueueSizes = new Map();   // userId -> число активных заявок этого пользователя
+
+function getRetry409Delay(userId) {
+  const n = userQueueSizes.get(userId) || 1;
+  const d = n * 800;
   return Math.min(Math.max(d, RETRY_409_MIN), RETRY_409_MAX);
 }
 
@@ -2360,12 +2370,18 @@ async function transferWorker() {
         AND  u.wb_session_token IS NOT NULL
         AND  (tr.next_retry_at IS NULL OR tr.next_retry_at <= NOW())
       ORDER BY tr.created_at ASC
-      LIMIT  100
+      LIMIT  500
     `);
 
-    if (!rows.length) return;
-    currentQueueSize = rows.length;   // для адаптивного интервала повтора
-    console.log(`[worker] Цикл: ${rows.length} заявок в очереди (интервал повтора ~${Math.round(getRetry409Delay()/1000)}с)`);
+    if (!rows.length) { userQueueSizes.clear(); return; }
+
+    // Считаем очередь ПО КАЖДОМУ пользователю — от неё зависит интервал его заявок
+    userQueueSizes.clear();
+    for (const r of rows) {
+      userQueueSizes.set(r.user_id, (userQueueSizes.get(r.user_id) || 0) + 1);
+    }
+    const usersCount = userQueueSizes.size;
+    console.log(`[worker] Цикл: ${rows.length} заявок / ${usersCount} польз. (интервал ~${Math.round(getRetry409Delay(rows[0].user_id) / 1000)}с)`);
 
     // Параллельная обработка заявок одного цикла.
     // Лимит на пользователя за цикл: WB даёт 300 запросов/мин на аккаунт продавца,
@@ -2409,7 +2425,7 @@ async function processRequest(req) {
     // Если result пустой/без wasMoved — это НЕ успех (защита от ложных «выполнена»).
     if (!result || typeof result.wasMoved !== 'number' || result.wasMoved <= (req.moved || 0)) {
       // Перемещение не подтверждено — повторяем, НЕ уведомляем об успехе
-      const nextRetry = new Date(Date.now() + getRetry409Delay());
+      const nextRetry = new Date(Date.now() + getRetry409Delay(req.user_id));
       const newCount  = req.retry_count + 1;
       await db.query(
         `UPDATE transfer_requests SET next_retry_at=\$1, retry_count=\$2, error_message=\$3 WHERE id=\$4`,
@@ -2445,7 +2461,7 @@ async function processRequest(req) {
     } else {
       // ⏳ Частично перемещено — сохраняем прогресс, продолжаем ловить квоту
       const justMoved = result.moved || 0;
-      const nextRetry = new Date(Date.now() + getRetry409Delay());
+      const nextRetry = new Date(Date.now() + getRetry409Delay(req.user_id));
       await db.query(
         `UPDATE transfer_requests SET moved=\$2, next_retry_at=\$3, error_message=\$4, updated_at=NOW() WHERE id=\$1`,
         [req.id, wasMoved, nextRetry, `Перемещено ${wasMoved} из ${total}, ждём квоту на остаток`]
@@ -2471,7 +2487,7 @@ async function processRequest(req) {
 
     } else if (status === 409) {
       // Временное препятствие (нет квоты / мало остатка / склад не принимает) — повтор
-      const nextRetry = new Date(Date.now() + getRetry409Delay());
+      const nextRetry = new Date(Date.now() + getRetry409Delay(req.user_id));
       const newCount  = req.retry_count + 1;
       // Отменяем по ВОЗРАСТУ заявки (96ч от создания), а не по числу попыток —
       // интервал теперь адаптивный, поэтому счётчик попыток неточен как мера времени.
